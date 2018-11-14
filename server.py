@@ -96,6 +96,7 @@ class Server:
     def __init__(self, addr="", port=80, limit=10, wrap_d=nullwrapper, wrap_e=nullwrapper, commands=None):
         self.addr, self.port, self.limit, self.wrap_d, self.wrap_e, self.connections, self.active, self.socket, self.commands = addr, port, limit, wrap_d, wrap_e, {}, False, socket.socket(), importlib.import_module(str(commands)) if commands != None else None
 
+
     def __repr__(self):
         return "[{}:{}] {} : {}".format(self.addr, self.port, self.active, self.connections)
 
@@ -137,3 +138,9 @@ class Server:
         self.connections[id].send(message, prefix)
     def end(self, id, msg="Client Disconnected by Server"):
         self.send(id, "close("+msg+")", "CMD")
+    def update(self, id=None):
+        if id == None:
+            for id in self.connections:
+                self.send(id, "TEST", prefix="PASS")
+        else:
+            self.send(id, "TEST", prefix="PASS")
