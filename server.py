@@ -23,7 +23,6 @@ class Client:
         self.send(self.id, "ID")
         self.server.add_connection(self)
         _thread.start_new_thread(self.recv_loop, tuple())
-        print("Connection from [{}:{}] : {}".format(self.addr, self.port, self.id))
 
     def __repr__(self):
         return "[{}:{}]".format(self.addr, self.port, self.active, self.socket)
