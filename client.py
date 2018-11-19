@@ -27,7 +27,7 @@ class Client:
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.connect((self.addr, self.port))
-        except ConnectionRefusedError as e:
+        except (ConnectionRefusedError, socket.timeout) as e:
             return self.close(e)
         id = self.recv(16)
         self.id = int(id[1]) if id[0] == "ID" else -1
