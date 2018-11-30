@@ -3,126 +3,138 @@ import _thread
 import importlib
 import secrets
 
-def nullwrapper(func):
-    def nullwrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-    return nullwrapper
-
-def CON_ERR(func):
+def CON_ERR(func): # closes the socket if any network related errors occur
     def CON_ERR(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except (ConnectionError, OSError) as e:
-            return args[0].close(e)
+            return args[0].close(e) # closes the socket if any network related errors occur
     return CON_ERR
 
 class Client:
 
     def __init__(self, addr, c_socket, server):
-        self.addr, self.port, self.id, self.active, self.socket, self.server, self.encrypt, self.target = addr[0], server.port, addr[1], False, c_socket, server, False, None
-        self.output_d, self.output_e = server.wrap_d(self.output_d), server.wrap_e(self.output_e)
-        self.server.add_connection(self)
-        self.send(self.id, "ID")
-        self.start_encryption()
+        self.addr = addr[0] # IPv4 Address
+        self.port = server.port # Port Number
+        self.id = addr[1] # ID - -1 means the socket is inactive
+        self.socket = c_socket # the socket object
+        self.server = server # weather to data is encrypted
+        self.target = False
+        self.size = 4096
+        self.received = [] # data that has been received and is not an in built prefix
 
-        _thread.start_new_thread(self.recv_loop, tuple())
+        self.server.add_connection(self)
+        self.send(self.id, "ID") # sends the ID of the Client for setup
+        self.encryption()
+
+        self.recv_loop()
 
     def __repr__(self):
-        return "[{}:{}]".format(self.addr, self.port, self.socket)
+        return "{} [{}:{}]{}".format(self.id, self.addr, self.port, " : "+str(self.target) if self.target else "")
 
-    def close(self, err=None):
+    def __bool__(self):
+        """Is False if the id is inactive so the connection is not up"""
+        return self.id != -1
+
+    def close(self):
+        """Closes connection with the Client"""
         try:
-            self.active = False
-            self.socket.close()
             self.server.remove_connection(self)
-            self.id = -1
+            self.id = -1 # to tell the recv_loop to stop
+            self.socket.close() # close the socket connection
             self.server.update()
-            return err
-        except (ConnectionError, OSError, KeyError) as e:
-            raise
+            return err # return an error if one was given
+        except (ConnectionError, OSError) as e:
+            raise # rasies an error if close if called twice in a row
 
     @CON_ERR
-    def send(self, message, prefix="DATA", bin=False, encrypt=None):
-        encrypt = (self.encrypt if encrypt == None else encrypt)
-        if not bin:
-            message = "<{}>{}".format(prefix.upper(), message).encode("utf-8")
-        if encrypt:
-            message = bytes([i ^ self.sk for i in message])
-        self.socket.send(message) # sends the var message
+    def send(self, message, *prefixes): # message - What is being sent, prefixes - The prefixes e.g. BIN, RLY, PASS, CMD, ERR, DATA
+        """Sends the data to the server with the prefixes for sorting the sent data"""
+        prefixes = ("<"+"".join((str(i).upper() for i in prefixes))+">").encode("utf-8") # all the prefixes in uppercase in one string then encoded
+        message = message if b"BIN" in prefixes else str(message).encode("utf-8") # the message is encoded if "BIN" is not found in the prefixes
+        data = prefixes+message # adds the prefixes and message into one stream of bytes
+        if self.server.encrypt: # if the data needs to be encrypted
+            data = bytes([i ^ self.sk for i in data]) # performs a XOR on the data using the private key
+        self.socket.send(data) # sends the data to the Client
     @CON_ERR
-    def recv(self, size=4096, bin=False, encrypt=None):
-        encrypt = (self.encrypt if encrypt == None else encrypt)
-        while True:
-            data = self.socket.recv(size) # recives decodes and strips any incoming messages
-            if encrypt:
-                data = bytes([i ^ self.sk for i in data])
-            if not bin:
-                data = data.decode("utf-8").strip()
-                if data:
-                    return data[1:].split(">", 1)
-            else:
-                return data
+    def recv(self):
+        """Recives the data from the Client and unpacks the data into prefixes and the message"""
+        data = b""
+        while data == b"": # makes sure the data is not empty
+            data = self.socket.recv(self.size)
+        if self.server.encrypt: # decrypts if necessary
+            data = bytes([i ^ self.sk for i in data])
+        prefixes = data[1:data.index(b">")].decode("utf-8") # seperates the prefixes from the message
+        message = data[data.index(b">")+1:] if "BIN" in prefixes else data[data.index(b">")+1:].decode("utf-8")
+        return prefixes, message # returns a tuple with the prefixes and the message
 
     def recv_loop(self):
-        self.active = True
-        while self.active:
-            self.data = self.recv()
-            if (self.data != None) and (not isinstance(self.data, Exception)):
-                if (self.target != None) and (self.data[0][:3] == "SLV"):
-                    self.target.send(self.data[1], self.data[0][3:])
-                else:
-                    self.handle()
+        while self: # while the connection is active
+            data = self.recv() # recv data
+            self.handle(data)
 
-    def handle(self):
-        if self.data[0] == "PASS":
+    def handle(self, data):
+        if isinstance(data, Exception): # make sure the connection didn't errror
+            return data # return the error
+        elif data[0][:3] == "RLY": # if the data needs to be relayed
+            self.send(data[1], data[0][3:]) # sends it on to the target Client
+        elif "PASS" in data[0]: # if prefix has "PASS" then do nothing
             pass
-        elif self.data[0] == "CMD":
+        elif "CMD" in data[0]: # if it's a command
             try:
-                command, args = self.data[1].split(" >> ", 1)
-                args = args.split(" >> ")
-                if (len(args) == 1) and (args[0] == "NULL"):    args = []
-                try:    return getattr(self, command)(*args)
-                except AttributeError:  pass
-                if self.server.commands != None:
-                    getattr(self.server.commands, command)(self, *args)
-            except IndexError:      self.send("INVALID CMD FORMAT", prefix="ERR")
-            except AttributeError:  self.send("INVALID CMD", prefix="ERR")
-            except TypeError:       self.send("INVALID ARG LEN", prefix="ERR")
-        elif self.data[0] == "ERR":
-            self.output_e()
-        elif self.data[0] == "DATA":
-            self.output_d()
-    def output_d(self):
-        return self.data[1]
-    def output_e(self):
-        return self.data[1]
+                command, args = data[1].split(" >> ", 1) # splits up the command into command and args
+                args = args.split(" >> ") # splits the args up seperataly
+                if (len(args) == 1) and (args[0] == "NULL"):    args = [] # if there are no args, pass empty list
+                try:    return getattr(self, command)(*args) # try Client functions
+                except AttributeError:  pass # do nothing
+                if self.server.commands != None: # only if there is a module
+                    return getattr(self.server.commands, command)(self, *args) # call the function with arguments (passes self as it is not a member function)
+            except (IndexError, TypeError, AttributeError) as e: # make sure the command exists
+                return AttributeError("Command Not Found")
+        else: # any other type of data
+            self.received.append(data) # add it to the buffer
+            try:    self.server.funcs[[prefix for prefix in self.server.funcs.keys() if prefix in data[0]][0]](self, data) # run the first function with the right prefix
+            except IndexError:  pass
 
-    def cmd(self, command, *args):
-        self.send(("{} >> "+((("{} >> "*(len(args)-1))+"{}") if len(args) > 0 else "NULL")).format(command, *args), prefix="CMD")
-
-    def start_encryption(self):
-        if self.server.encrypt:
-            pk = secrets.randbelow(4096)
-            self.send(self.server.helman["g"]**pk % self.server.helman["p"], "CRT")
-            self.send(str(self.server.helman["g"])+" - "+str(self.server.helman["p"]), "CRT")
-            self.sk = (int(self.recv()[1])**pk % self.server.helman["p"]) % 256
-            self.encrypt = True
+    def data(self, *prefixes, res=False):
+        if res: # if we will wait for a response with the required prefixes
+            while True: # wait forever
+                messages = [message for message in self.recvied if all([prefix.lower() in message[0] for prefix in prefixes])] # check the messages
+                if messages != []: # if some were found
+                    break # end the loop
         else:
-            self.send("False", "CRT")
+            messages = [message for message in self.recvied if all([prefix.lower() in message[0] for prefix in prefixes])] # grab whatever fits the bill
+        for message in messages: # remove all of the chosen messages from the buffer
+            self.recvied.remove(message)
+        return messages # return the chosen messages
 
-    def connect(self, id):
-        try:
-            self.target = self.server.connections[int(id)]
-        except KeyError:    self.target = None
-        message = "False" if self.target == None else "True"
-        self.send(message, "PASS")
-        self.send(message, "PASS")
+    def encryption(self):
+        pk = secrets.randbelow(4096) # generate a private key
+        self.send("-".join((str(self.server.helman["g"]), str(self.server.helman["p"]), str(self.server.helman["g"]**pk % self.server.helman["p"]) if self.server.encrypt else "False")), "CRT") # sends the public keys and g**B % p if the server is setup to encrypt
+        data = self.recv() # recv g**A % p from the Client
+        if data[0] == "CRT":
+            self.sk = (int(data[1])**pk % self.helman["p"]) % 256 # calculate the shared private key
+        else:
+            self.close()
+
+    def relay(self):
+        pass
+    def cmd(self, command, *args, prefixes=""):
+        self.send("{} >> {}".format(command, " >> ".join((str(a) for a in args)) if args else "NULL"), "CMD", prefixes)
 
 class Server:
 
-    def __init__(self, addr="", port=80, limit=10, wrap_d=nullwrapper, wrap_e=nullwrapper, commands=None, encrypt=False):
-        self.addr, self.port, self.limit, self.wrap_d, self.wrap_e, self.connections, self.active, self.socket, self.commands, self.encrypt = addr, port, limit, wrap_d, wrap_e, {}, False, socket.socket(), importlib.import_module(str(commands)) if commands != None else None, encrypt
-        self.helman = {"g": get_prime(), "p":get_prime()}
+    def __init__(self, addr="", port=80, limit=10, commands=None, encrypt=False, **funcs):
+        self.addr = addr # IPv4 Address
+        self.port = port # Port Number
+        self.limit = limit # Number of max connections
+        self.funcs = {str(k).upper() : funcs[k] for k in funcs} # the functions that get called upon certain prefixes being recvied
+        self.commands = None if commands == None else importlib.import_module(str(commands)) # the module that commands can be found in
+        self.encrypt = encrypt # Whether the Server will encrpyt the data sent
+        self.helman = {"g": 1, "p":1}
+        self.connections = {} # A dictionary to hold the Client objects when they are active
+        self.socket = socket.socket()
+        self.active = False # Whether the Server is accepting connections
 
     def __repr__(self):
         return "[{}:{}] {} : {}".format(self.addr if self.addr else "*.*.*.*", self.port, self.active, self.connections)
@@ -131,31 +143,34 @@ class Server:
         return self.connections[key]
     def __setitem__(self, key, value):
         self.connections[key] = value
+    def __iter__(self):
+        return self.connections.__iter__()
 
     def open(self):
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.bind((self.addr, self.port))
             self.socket.listen(self.limit)
-        except ConnectionRefusedError as e:
+        except (ConnectionRefusedError, OSError) as e:
             return self.close(e)
+        self.active = True
+
         _thread.start_new_thread(self.recv_loop, tuple())
 
     def close(self, err=None, end=True):
         try:
             self.active = False
+            self.socket.close()
             if end:
                 for id in self.connections:
-                    self.end(id, "Server Shutting Down")
-            self.socket.close()
+                    self.connections[id].close()
             return err
         except (ConnectionError, OSError) as e:
             raise
 
     @CON_ERR
     def recv_loop(self):
-        self.active = True
-        while self.active:
+        while self:
             c_socket, addr = self.socket.accept()
             _thread.start_new_thread(Client, (addr, c_socket, self))
 
@@ -164,26 +179,12 @@ class Server:
     def remove_connection(self, cl):
         del self.connections[cl.id]
 
-    def send(self, id, message, prefix="DATA"):
-        self.connections[id].send(message, prefix)
-    def cmd(self, id, command, *args):
-        self.connections[id].cmd(command, *args)
-    def end(self, id, msg="Client Disconnected by Server"):
-        self.cmd(id, "close", msg)
-    def update(self, id=None):
-        if id == None:
-            for id in [i for i in self.connections]:
-                self.send(id, "TEST", prefix="PASS")
-        else:
-            self.send(id, "TEST", prefix="PASS")
-
-def get_prime():
-    def is_prime(num):
-        for i in range(2, (num+1)//2+1):
-            if not num % i:
-                return False
-        return True
-    num = secrets.randbelow(2048)
-    while not is_prime(num):
-        num = secrets.randbelow(2048)
-    return num
+    def send(self, id, message, *prefixes):
+        self.connections[id].send(message, *prefixes)
+    def cmd(self, id, command, *args, prefixes=""):
+        self.connections[id].cmd(message, *args, prefixes=prefixes)
+    def end(self, id):
+        self.connections[id].close()
+    def update(self):
+        for cl in self.connections.values:
+            cl.close()
