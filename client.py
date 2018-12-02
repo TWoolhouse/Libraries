@@ -27,6 +27,9 @@ class Client:
         self.received = [] # data that has been received and is not an in built prefix
 
     def __repr__(self):
+        return str(self.socket)
+
+    def __str__(self):
         return "{} [{}:{}]{}".format(self.id, self.addr, self.port, " -> "+str(self.target) if self.target != -1 else "")
 
     def __bool__(self):

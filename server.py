@@ -29,7 +29,7 @@ class Client:
 
         self.recv_loop()
 
-    def __repr__(self):
+    def __str__(self):
         return "{} [{}:{}]{}".format(self.id, self.addr, self.port, " -> "+str(self.target) if self.target != -1 else "")
 
     def __bool__(self):
@@ -150,6 +150,9 @@ class Server:
         self.active = False # Whether the Server is accepting connections
 
     def __repr__(self):
+        return "{} - {}".format(self.socket, "".join((str(i.socket) for i in self.connections)))
+
+    def __str__(self):
         return "[{}:{}] {} :{}".format(self.addr if self.addr else "*.*.*.*", self.port, self.active, "\n\t"+("\n\t".join((str(i) for i in self.connections.values()))))
 
     def __getitem__(self, key):
@@ -175,7 +178,7 @@ class Server:
             self.active = False
             self.socket.close()
             if end:
-                for id in self.connections:
+                for id in [i for i in self.connections]:
                     self.connections[id].close()
             return err
         except (ConnectionError, OSError) as e:
