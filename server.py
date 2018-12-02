@@ -19,7 +19,7 @@ class Client:
         self.id = addr[1] # ID - -1 means the socket is inactive
         self.socket = c_socket # the socket object
         self.server = server # weather to data is encrypted
-        self.target = False
+        self.target = -1
         self.size = 4096
         self.received = [] # data that has been received and is not an in built prefix
 
@@ -30,22 +30,22 @@ class Client:
         self.recv_loop()
 
     def __repr__(self):
-        return "{} [{}:{}]{}".format(self.id, self.addr, self.port, " : "+str(self.target) if self.target else "")
+        return "{} [{}:{}]{}".format(self.id, self.addr, self.port, " -> "+str(self.target) if self.target != -1 else "")
 
     def __bool__(self):
         """Is False if the id is inactive so the connection is not up"""
         return self.id != -1
 
-    def close(self):
+    def close(self, err=None):
         """Closes connection with the Client"""
         try:
-            self.server.remove_connection(self)
             self.id = -1 # to tell the recv_loop to stop
             self.socket.close() # close the socket connection
-            self.server.update()
+            self.server.remove_connection() # remove any invalid connections
+            self.server.update() # remove any invalid connections
             return err # return an error if one was given
         except (ConnectionError, OSError) as e:
-            raise # rasies an error if close if called twice in a row
+            raise Exception("WELL THIS DIDN'T GO WELL")# rasies an error if close if called twice in a row
 
     @CON_ERR
     def send(self, message, *prefixes): # message - What is being sent, prefixes - The prefixes e.g. BIN, RLY, PASS, CMD, ERR, DATA
@@ -71,13 +71,15 @@ class Client:
     def recv_loop(self):
         while self: # while the connection is active
             data = self.recv() # recv data
-            self.handle(data)
+            _thread.start_new_thread(self.handle, (data,)) # make a new thread to handle the data so it can keep the recv_loop going
 
     def handle(self, data):
         if isinstance(data, Exception): # make sure the connection didn't errror
             return data # return the error
         elif data[0][:3] == "RLY": # if the data needs to be relayed
-            self.send(data[1], data[0][3:]) # sends it on to the target Client
+            if self.target != -1 and self.target.id != -1: # checks to see if it has a target and if it is still open
+                self.target.send(data[1], data[0][3:]) # sends it on to the target Client
+            else:   self.cmd("relay", "-1") # tell the Client to reset their target
         elif "PASS" in data[0]: # if prefix has "PASS" then do nothing
             pass
         elif "CMD" in data[0]: # if it's a command
@@ -99,26 +101,37 @@ class Client:
     def data(self, *prefixes, res=False):
         if res: # if we will wait for a response with the required prefixes
             while True: # wait forever
-                messages = [message for message in self.recvied if all([prefix.lower() in message[0] for prefix in prefixes])] # check the messages
+                messages = [message for message in self.received if all([prefix.upper() in message[0] for prefix in prefixes])] # check the messages
                 if messages != []: # if some were found
                     break # end the loop
         else:
-            messages = [message for message in self.recvied if all([prefix.lower() in message[0] for prefix in prefixes])] # grab whatever fits the bill
+            messages = [message for message in self.received if all([prefix.upper() in message[0] for prefix in prefixes])] # grab whatever fits the bill
         for message in messages: # remove all of the chosen messages from the buffer
-            self.recvied.remove(message)
+            self.received.remove(message)
         return messages # return the chosen messages
 
     def encryption(self):
         pk = secrets.randbelow(4096) # generate a private key
         self.send("-".join((str(self.server.helman["g"]), str(self.server.helman["p"]), str(self.server.helman["g"]**pk % self.server.helman["p"]) if self.server.encrypt else "False")), "CRT") # sends the public keys and g**B % p if the server is setup to encrypt
-        data = self.recv() # recv g**A % p from the Client
-        if data[0] == "CRT":
-            self.sk = (int(data[1])**pk % self.helman["p"]) % 256 # calculate the shared private key
-        else:
-            self.close()
+        if self.server.encrypt: # if the server is set to encrypt wait for the key from Client
+            data = self.recv() # recv g**A % p from the Client
+            if data[0] == "CRT":
+                self.sk = (int(data[1])**pk % self.helman["p"]) % 256 # calculate the shared private key
+            else:
+                self.close() # close if you do not recv the key
 
-    def relay(self):
-        pass
+    def relay(self, id):
+        try:    id = int(id) # check the id is a num
+        except ValueError:
+            self.send("False", "MKCON") # send False to tell the Client this has failed
+            self.target = -1 # tell the server we have no connection
+        if id in self.server.connections: # if the id is valid
+            self.send("True", "MKCON") # send True
+            self.target = self.server.connections[id] # tell the sever we have a connection
+        else:
+            self.send("False", "MKCON") # send False to tell the Client this has failed
+            self.target = -1 # tell the server we have no connection
+
     def cmd(self, command, *args, prefixes=""):
         self.send("{} >> {}".format(command, " >> ".join((str(a) for a in args)) if args else "NULL"), "CMD", prefixes)
 
@@ -128,7 +141,7 @@ class Server:
         self.addr = addr # IPv4 Address
         self.port = port # Port Number
         self.limit = limit # Number of max connections
-        self.funcs = {str(k).upper() : funcs[k] for k in funcs} # the functions that get called upon certain prefixes being recvied
+        self.funcs = {str(k).upper() : funcs[k] for k in funcs} # the functions that get called upon certain prefixes being received
         self.commands = None if commands == None else importlib.import_module(str(commands)) # the module that commands can be found in
         self.encrypt = encrypt # Whether the Server will encrpyt the data sent
         self.helman = {"g": 1, "p":1}
@@ -137,7 +150,7 @@ class Server:
         self.active = False # Whether the Server is accepting connections
 
     def __repr__(self):
-        return "[{}:{}] {} : {}".format(self.addr if self.addr else "*.*.*.*", self.port, self.active, self.connections)
+        return "[{}:{}] {} :{}".format(self.addr if self.addr else "*.*.*.*", self.port, self.active, "\n\t"+("\n\t".join((str(i) for i in self.connections.values()))))
 
     def __getitem__(self, key):
         return self.connections[key]
@@ -176,8 +189,13 @@ class Server:
 
     def add_connection(self, cl):
         self.connections[cl.id] = cl
-    def remove_connection(self, cl):
-        del self.connections[cl.id]
+    def remove_connection(self, cl=None):
+        if cl != None:
+            del self.connections[cl]
+        else:
+            for i in [j for j in self.connections]:
+                if self.connections[i].id == -1:
+                    del self.connections[i]
 
     def send(self, id, message, *prefixes):
         self.connections[id].send(message, *prefixes)
@@ -186,5 +204,5 @@ class Server:
     def end(self, id):
         self.connections[id].close()
     def update(self):
-        for cl in self.connections.values:
-            cl.close()
+        for cl in [i for i in self.connections]:
+            self.connections[cl].send("PASS", "PASS")
