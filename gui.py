@@ -17,7 +17,7 @@ class Window(tk.Tk):
     def show_page(self, page):
         """Takes a name and raises the Page to the front and calls Page.show()"""
         try:
-            self.pages[page].show()
+            self.pages[page]._show()
         except KeyError as e:
             raise KeyError("'{}' is not a page in this Window".format(page))
 
@@ -52,8 +52,6 @@ class Page(tk.Frame):
 
     def add(self, wiget, name="_temp", **options):
         """tk.Wiget, name in wiget dict, grid options"""
-        if "sticky" not in options:
-            options["sticky"] = "nsew"
         self.wigets[name] = wiget
         self.wigets[name].grid(options)
 
@@ -61,9 +59,13 @@ class Page(tk.Frame):
         """wiget name, value to edit, value"""
         self.wigets[wiget][key] = value
 
-    def show(self):
+    def _show(self):
         """Called when raised to the front of the stack"""
         self.tkraise()
+        self.show()
+
+    def show(self):
+        pass
 
     def show_page(self, page):
         """Calls parent.show_page() with page"""

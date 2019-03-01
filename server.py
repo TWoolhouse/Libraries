@@ -94,9 +94,8 @@ class Client:
             except (IndexError, TypeError, AttributeError) as e: # make sure the command exists
                 return AttributeError("Command Not Found")
         else: # any other type of data
-            self.received.append(data) # add it to the buffer
             try:    self.server.funcs[[prefix for prefix in self.server.funcs.keys() if prefix in data[0]][0]](self, data) # run the first function with the right prefix
-            except IndexError:  pass
+            except IndexError:  self.received.append(data) # add it to the buffer
 
     def data(self, *prefixes, res=False):
         if res: # if we will wait for a response with the required prefixes

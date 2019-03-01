@@ -15,8 +15,8 @@ def Screen(title="Title", size=None, tracer=0):
     """Returns a new turtle screen"""
     return turtle.Screen(title, size, tracer)
 
-def Canvas(master):
-    return turtle.ScrolledCanvas(master)
+def Canvas(master, size=None):
+    return turtle.Canvas(master)
 
 class RawTurtle(turtle.RawTurtle):
 
