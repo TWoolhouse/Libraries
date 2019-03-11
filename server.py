@@ -20,14 +20,14 @@ class Client:
         self.socket = c_socket # the socket object
         self.server = server # weather to data is encrypted
         self.target = -1
-        self.size = 4096
+        self._size = 4096
         self.received = [] # data that has been received and is not an in built prefix
 
-        self.server.add_connection(self)
+        self.server._add_connection(self)
         self.send(self.id, "ID") # sends the ID of the Client for setup
         self.encryption()
 
-        self.recv_loop()
+        self._recv_loop()
 
     def __str__(self):
         return "{} [{}:{}]{}".format(self.id, self.addr, self.port, " -> "+str(self.target) if self.target != -1 else "")
@@ -41,7 +41,7 @@ class Client:
         try:
             self.id = -1 # to tell the recv_loop to stop
             self.socket.close() # close the socket connection
-            self.server.remove_connection() # remove any invalid connections
+            self.server._remove_connection() # remove any invalid connections
             self.server.update() # remove any invalid connections
             return err # return an error if one was given
         except (ConnectionError, OSError) as e:
@@ -61,19 +61,19 @@ class Client:
         """Recives the data from the Client and unpacks the data into prefixes and the message"""
         data = b""
         while data == b"": # makes sure the data is not empty
-            data = self.socket.recv(self.size)
+            data = self.socket.recv(self._size)
         if self.server.encrypt: # decrypts if necessary
             data = bytes([i ^ self.sk for i in data])
         prefixes = data[1:data.index(b">")].decode("utf-8") # seperates the prefixes from the message
         message = data[data.index(b">")+1:] if "BIN" in prefixes else data[data.index(b">")+1:].decode("utf-8")
         return prefixes, message # returns a tuple with the prefixes and the message
 
-    def recv_loop(self):
+    def _recv_loop(self):
         while self: # while the connection is active
             data = self.recv() # recv data
-            _thread.start_new_thread(self.handle, (data,)) # make a new thread to handle the data so it can keep the recv_loop going
+            _thread.start_new_thread(self._handle, (data,)) # make a new thread to handle the data so it can keep the recv_loop going
 
-    def handle(self, data):
+    def _handle(self, data):
         if isinstance(data, Exception): # make sure the connection didn't errror
             return data # return the error
         elif data[0][:3] == "RLY": # if the data needs to be relayed
@@ -131,6 +131,11 @@ class Client:
             self.send("False", "MKCON") # send False to tell the Client this has failed
             self.target = -1 # tell the server we have no connection
 
+    def size(self, val, other=None):
+        self._size = int(val)
+        if other:
+            self.cmd("size", val)
+
     def cmd(self, command, *args, prefixes=""):
         self.send("{} >> {}".format(command, " >> ".join((str(a) for a in args)) if args else "NULL"), "CMD", prefixes)
 
@@ -160,6 +165,11 @@ class Server:
         self.connections[key] = value
     def __iter__(self):
         return self.connections.__iter__()
+    def __enter__(self):
+        self.open()
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        return traceback
 
     def open(self):
         try:
@@ -170,7 +180,7 @@ class Server:
             return self.close(e)
         self.active = True
 
-        _thread.start_new_thread(self.recv_loop, tuple())
+        _thread.start_new_thread(self._recv_loop, tuple())
 
     def close(self, err=None, end=True):
         try:
@@ -184,14 +194,14 @@ class Server:
             raise
 
     @CON_ERR
-    def recv_loop(self):
+    def _recv_loop(self):
         while self:
             c_socket, addr = self.socket.accept()
             _thread.start_new_thread(Client, (addr, c_socket, self))
 
-    def add_connection(self, cl):
+    def _add_connection(self, cl):
         self.connections[cl.id] = cl
-    def remove_connection(self, cl=None):
+    def _remove_connection(self, cl=None):
         if cl != None:
             del self.connections[cl]
         else:

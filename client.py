@@ -23,7 +23,7 @@ class Client:
         self.target = -1 # the ID of the target via the server
         self.funcs = {str(k).upper() : funcs[k] for k in funcs} # the functions that get called upon certain prefixes being received
         self.commands = None if commands == None else importlib.import_module(str(commands)) # the module that commands can be found in
-        self.size = 4096
+        self._size = 4096
         self.received = [] # data that has been received and is not an in built prefix
 
     def __repr__(self):
@@ -36,6 +36,12 @@ class Client:
         """Is False if the id is inactive so the connection is not up"""
         return self.id != -1
 
+    def __enter__(self):
+        self.open()
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        return traceback
+
     def open(self):
         """Opens the socket and connects to the server"""
         try:
@@ -47,7 +53,7 @@ class Client:
         self.id = int(id[1]) if id[0] == "ID" else -1 # check the id sent is an id
         if self: # if the id is valid (therefore there is a connection)
             self.encryption() # perform a diffe-helman if necessary
-            _thread.start_new_thread(self.recv_loop, tuple()) # start the recv_loop in a new thread so it is always listening
+            _thread.start_new_thread(self._recv_loop, tuple()) # start the recv_loop in a new thread so it is always listening
         else:
             return self.close(ConnectionRefusedError("Server sent no ID"))
 
@@ -75,14 +81,14 @@ class Client:
         """Recives the data from the Server and unpacks the data into prefixes and the message"""
         data = b""
         while data == b"": # makes sure the data is not empty
-            data = self.socket.recv(self.size)
+            data = self.socket.recv(self._size)
         if self.encrypt: # decrypts if necessary
             data = bytes([i ^ self.sk for i in data])
         prefixes = data[1:data.index(b">")].decode("utf-8") # seperates the prefixes from the message
         message = data[data.index(b">")+1:] if "BIN" in prefixes else data[data.index(b">")+1:].decode("utf-8")
         return prefixes, message # returns a tuple with the prefixes and the message
 
-    def recv_loop(self):
+    def _recv_loop(self):
         while self: # while the connection is active
             data = self.recv() # recv data
             _thread.start_new_thread(self.handle, (data,)) # make a new thread to handle the data so it can keep the recv_loop going
@@ -139,9 +145,15 @@ class Client:
             self.target = id # set target to the id
         else:
             self.target = -1 # if it has failed, reset the target to -1 (fail state)
+        return self.target != -1
 
     def tunnel(self): # TODO
         pass
 
+    def size(self, val, other=None):
+        self._size = int(val)
+        if other:
+            self.cmd("size", val)
+
     def cmd(self, command, *args, prefixes=""):
-        self.send("{} >> {}".format(command, " >> ".join((str(a) for a in args)) if args else "NULL"), "CMD", prefixes)
+        self.send("{} >> {}".format(command, " >> ".join((str(a) for a in args)) if args else "NULL"), prefixes, "CMD")
