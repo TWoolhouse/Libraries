@@ -2,6 +2,8 @@ import socket
 import _thread
 import importlib
 import secrets
+import crypt
+import hashes
 
 def CON_ERR(func): # closes the socket if any network related errors occur
     def CON_ERR(*args, **kwargs):
@@ -13,12 +15,13 @@ def CON_ERR(func): # closes the socket if any network related errors occur
 
 class Client:
 
-    def __init__(self, addr="127.0.0.1", port=80, commands=None, **funcs):
+    def __init__(self, addr="127.0.0.1", port=80, commands=None, password=None, **funcs):
         """addr - IPv4 addr, port - port number, commands - The name of a module for the commands, funcs - the name of the prefix and the function to call when received"""
         self.addr = addr # IPv4 Address
         self.port = port # Port Number
         self.id = -1 # ID - -1 means the socket is inactive
         self.socket = socket.socket() # the socket object
+        self.password = hashes.hmac(password, password) if password else None
         self.encrypt = False # weather to data is encrypted
         self.target = -1 # the ID of the target via the server
         self.funcs = {str(k).upper() : funcs[k] for k in funcs} # the functions that get called upon certain prefixes being received
@@ -52,6 +55,7 @@ class Client:
         id = self.recv() # get the id from server
         self.id = int(id[1]) if id[0] == "ID" else -1 # check the id sent is an id
         if self: # if the id is valid (therefore there is a connection)
+            self.password()
             self.encryption() # perform a diffe-helman if necessary
             _thread.start_new_thread(self._recv_loop, tuple()) # start the recv_loop in a new thread so it is always listening
         else:
@@ -73,7 +77,7 @@ class Client:
         message = message if b"BIN" in prefixes else str(message).encode("utf-8") # the message is encoded if "BIN" is not found in the prefixes
         data = prefixes+message # adds the prefixes and message into one stream of bytes
         if self.encrypt: # if the data needs to be encrypted
-            data = bytes([i ^ self.sk for i in data]) # performs a XOR on the data using the private key
+            data = crypt.encode(data, self.sk, False) # bytes([i ^ self.sk for i in data]) # performs a XOR on the data using the private key
         self.socket.send(data) # sends the data to the server
 
     @CON_ERR
@@ -83,7 +87,7 @@ class Client:
         while data == b"": # makes sure the data is not empty
             data = self.socket.recv(self._size)
         if self.encrypt: # decrypts if necessary
-            data = bytes([i ^ self.sk for i in data])
+            data = crypt.decode(data, self.sk, False) # bytes([i ^ self.sk for i in data])
         prefixes = data[1:data.index(b">")].decode("utf-8") # seperates the prefixes from the message
         message = data[data.index(b">")+1:] if "BIN" in prefixes else data[data.index(b">")+1:].decode("utf-8")
         return prefixes, message # returns a tuple with the prefixes and the message
@@ -128,13 +132,19 @@ class Client:
             self.received.remove(message)
         return messages # return the chosen messages
 
+    def password(self):
+        data = self.data("PWD")[0]
+        if data[1] == "True":
+            pw = hashes.hmac(self.password, self.id)
+            self.send(pw, "PWD", "BIN")
+
     def encryption(self):
-        data = self.recv() # recv the keys and g**B % p from the server
+        data = self.data("CRT") # recv the keys and g**B % p from the server
         self.helman = {k : v for k,v in zip(("g", "p"), (int(i) for i in data[1].split("-")))} # save the public keys
         if data[0] == "CRT" and data[1].split("-")[2] != "False": # if the server is setup for encryption
             pk = secrets.randbelow(4096) # generate a private key
             self.send(self.helman["g"]**pk % self.helman["p"], "CRT") # send g**A % p
-            self.sk = (int(data[1].split("-")[2])**pk % self.helman["p"]) % 256 # calculate the shared private key
+            self.sk = (int(data[1].split("-")[2])**pk % self.helman["p"]) # calculate the shared private key
             self.encrypt = True # tell the Client to encrypt the data sent and received
         else:
             self.encrypt = False # tell the Client to not encrypt the data sent and received

@@ -3,20 +3,23 @@ import tkinter as tk
 class Window(tk.Tk):
     """Tk root Window"""
 
-    def __init__(self, title="Title", geometry="800x800"):
-        """Title and Geometry as a string "800x800" """
+    def __init__(self, title="Title", x=800, y=800, font="TkDefaultFont"):
+        """Title and Geometry """
         super().__init__()
         self.title(title)
-        self.geometry(geometry)
+        self.geometry(str(x)+"x"+str(y))
         self.grid_rowconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(2, weight=1)
+        self.option_add("*Font", font)
         self.pages = {}
+        self.active = None
 
     def show_page(self, page):
         """Takes a name and raises the Page to the front and calls Page.show()"""
         try:
+            self.active = self.pages[page]
             self.pages[page]._show()
         except KeyError as e:
             raise KeyError("'{}' is not a page in this Window".format(page))
@@ -29,10 +32,14 @@ class Window(tk.Tk):
     def __getitem__(self, key):
         return self.pages[key]
 
+    def update(self):
+        self.active.update()
+        super().update()
+
 class Page(tk.Frame):
     """Tk Frame"""
 
-    def __init__(self, parent, name):
+    def __init__(self, parent, name, *args):
         """Parent Window and the Name to be used in the dict of pages"""
         self.name = name
         self.parent = parent
@@ -43,6 +50,7 @@ class Page(tk.Frame):
         self.grid_rowconfigure(9999, weight=1)
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(9999, weight=1)
+        self.setup(*args)
 
     def __getitem__(self, key):
         return self.wigets[key]
@@ -64,12 +72,18 @@ class Page(tk.Frame):
         self.tkraise()
         self.show()
 
-    def show(self):
-        pass
-
     def show_page(self, page):
         """Calls parent.show_page() with page"""
         self.parent.show_page(page)
+
+    def show(self):
+        pass
+
+    def setup(self):
+        pass
+
+    def update(self):
+        pass
 
 def Cmd(func, *options):
     """Takes a function followed by its arguments"""

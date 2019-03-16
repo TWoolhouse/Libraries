@@ -2,6 +2,8 @@ import socket
 import _thread
 import importlib
 import secrets
+import crypt
+import hashes
 
 def CON_ERR(func): # closes the socket if any network related errors occur
     def CON_ERR(*args, **kwargs):
@@ -25,6 +27,7 @@ class Client:
 
         self.server._add_connection(self)
         self.send(self.id, "ID") # sends the ID of the Client for setup
+        self.password()
         self.encryption()
 
         self._recv_loop()
@@ -54,7 +57,7 @@ class Client:
         message = message if b"BIN" in prefixes else str(message).encode("utf-8") # the message is encoded if "BIN" is not found in the prefixes
         data = prefixes+message # adds the prefixes and message into one stream of bytes
         if self.server.encrypt: # if the data needs to be encrypted
-            data = bytes([i ^ self.sk for i in data]) # performs a XOR on the data using the private key
+            data = crypt.encode(data, self.sk, False) # bytes([i ^ self.sk for i in data]) # performs a XOR on the data using the private key
         self.socket.send(data) # sends the data to the Client
     @CON_ERR
     def recv(self):
@@ -63,7 +66,7 @@ class Client:
         while data == b"": # makes sure the data is not empty
             data = self.socket.recv(self._size)
         if self.server.encrypt: # decrypts if necessary
-            data = bytes([i ^ self.sk for i in data])
+            data = crypt.decode(data, self.sk, False) # bytes([i ^ self.sk for i in data])
         prefixes = data[1:data.index(b">")].decode("utf-8") # seperates the prefixes from the message
         message = data[data.index(b">")+1:] if "BIN" in prefixes else data[data.index(b">")+1:].decode("utf-8")
         return prefixes, message # returns a tuple with the prefixes and the message
@@ -109,13 +112,22 @@ class Client:
             self.received.remove(message)
         return messages # return the chosen messages
 
+    def password(self):
+        if self.server.password:
+            pw = hashes.hmac(self.server.password, self.id)
+            self.send("True", "PWD", "BIN")
+            if pw != self.data("PWD")[0]:
+                self.close()
+        else:
+            self.send("False", "PWD")
+
     def encryption(self):
         pk = secrets.randbelow(4096) # generate a private key
         self.send("-".join((str(self.server.helman["g"]), str(self.server.helman["p"]), str(self.server.helman["g"]**pk % self.server.helman["p"]) if self.server.encrypt else "False")), "CRT") # sends the public keys and g**B % p if the server is setup to encrypt
         if self.server.encrypt: # if the server is set to encrypt wait for the key from Client
             data = self.recv() # recv g**A % p from the Client
             if data[0] == "CRT":
-                self.sk = (int(data[1])**pk % self.helman["p"]) % 256 # calculate the shared private key
+                self.sk = (int(data[1])**pk % self.helman["p"]) # calculate the shared private key
             else:
                 self.close() # close if you do not recv the key
 
@@ -141,14 +153,15 @@ class Client:
 
 class Server:
 
-    def __init__(self, addr="", port=80, limit=10, commands=None, encrypt=False, **funcs):
+    def __init__(self, addr="", port=80, limit=10, commands=None, password=None, encrypt=False, **funcs):
         self.addr = addr # IPv4 Address
         self.port = port # Port Number
         self.limit = limit # Number of max connections
         self.funcs = {str(k).upper() : funcs[k] for k in funcs} # the functions that get called upon certain prefixes being received
         self.commands = None if commands == None else importlib.import_module(str(commands)) # the module that commands can be found in
+        self.password = hashes.hmac(password, password) if password else None
         self.encrypt = encrypt # Whether the Server will encrpyt the data sent
-        self.helman = {"g": 1, "p":1}
+        self.helman = {"g": 2, "p": 2}
         self.connections = {} # A dictionary to hold the Client objects when they are active
         self.socket = socket.socket()
         self.active = False # Whether the Server is accepting connections
