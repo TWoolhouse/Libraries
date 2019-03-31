@@ -4,7 +4,7 @@ class Vector(object):
 
     def __init__(self, *values):
         if len(values) == 0:
-            self.values = (0)
+            self.values = (0,)
         else:
             self.values = values
 
@@ -99,9 +99,3 @@ class Vector(object):
     def opp_err(self, opp, b):
         return "unsupported operand type(s) for {}: '{}' and '{}'".format(\
         opp, type(self).__name__, type(b).__name__)
-
-if __name__ == "__main__":
-    x = Vector(25, 0)
-    #x.norm()
-    x.limit(27)
-    print(x)
