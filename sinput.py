@@ -7,7 +7,7 @@ SendInput = ctypes.windll.user32.SendInput
 # C struct redefinitions
 PUL = ctypes.POINTER(ctypes.c_ulong)
 
-class KeyboardInput(ctypes.Structure):
+class _KeyboardInput(ctypes.Structure):
     _fields_ = [
         ("wVk", ctypes.c_ushort),
         ("wScan", ctypes.c_ushort),
@@ -16,14 +16,14 @@ class KeyboardInput(ctypes.Structure):
         ("dwExtraInfo", PUL)
     ]
 
-class HardwareInput(ctypes.Structure):
+class _HardwareInput(ctypes.Structure):
     _fields_ = [
         ("uMsg", ctypes.c_ulong),
         ("wParamL", ctypes.c_short),
         ("wParamH", ctypes.c_ushort)
     ]
 
-class MouseInput(ctypes.Structure):
+class _MouseInput(ctypes.Structure):
     _fields_ = [
         ("dx", ctypes.c_long),
         ("dy", ctypes.c_long),
@@ -35,9 +35,9 @@ class MouseInput(ctypes.Structure):
 
 class InputI(ctypes.Union):
     _fields_ = [
-        ("ki", KeyboardInput),
-        ("mi", MouseInput),
-        ("hi", HardwareInput)
+        ("ki", _KeyboardInput),
+        ("mi", _MouseInput),
+        ("hi", _HardwareInput)
     ]
 
 class Input(ctypes.Structure):
@@ -236,11 +236,11 @@ def _send(func):
 
 @_send
 def key_pressed(ii, code):
-    ii.ki = KeyboardInput(code, 0x48, 0, 0, ctypes.pointer(ctypes.c_ulong(0)))
+    ii.ki = _KeyboardInput(code, 0x48, 0, 0, ctypes.pointer(ctypes.c_ulong(0)))
 
 @_send
 def key_released(ii, code):
-    ii.ki = KeyboardInput(code, 0x48, 0x0002, 0, ctypes.pointer(ctypes.c_ulong(0)))
+    ii.ki = _KeyboardInput(code, 0x48, 0x0002, 0, ctypes.pointer(ctypes.c_ulong(0)))
 
 @_send
 def mouse_pressed(ii, code=VK.LBUTTON):
@@ -259,7 +259,7 @@ def mouse_pressed(ii, code=VK.LBUTTON):
         data = 0x0002
     else:
         flag = 0
-    ii.mi = MouseInput(0, 0, data, flag, 0, ctypes.pointer(ctypes.c_ulong(0)))
+    ii.mi = _MouseInput(0, 0, data, flag, 0, ctypes.pointer(ctypes.c_ulong(0)))
 
 @_send
 def mouse_released(ii, code=VK.LBUTTON):
@@ -278,11 +278,16 @@ def mouse_released(ii, code=VK.LBUTTON):
         data = 0x0002
     else:
         flag = 0
-    ii.mi = MouseInput(0, 0, data, flag, 0, ctypes.pointer(ctypes.c_ulong(0)))
+    ii.mi = _MouseInput(0, 0, data, flag, 0, ctypes.pointer(ctypes.c_ulong(0)))
 
 @_send
 def mouse_moved(ii, x, y, rel):
-    ii.mi = MouseInput(x, y, 0, 0x0001 if rel else 0xC001, 0, ctypes.pointer(ctypes.c_ulong(0)))
+    ii.mi = _MouseInput(x, y, 0, 0x0001 if rel else 0xC001, 0, ctypes.pointer(ctypes.c_ulong(0)))
+
+def key_press(code):
+    key_pressed(1, code)
+def key_release(code):
+    key_released(1, code)
 
 def click(code, length=0):
     mouse_pressed(0, code)
@@ -293,6 +298,6 @@ def move(x, y, rel=True):
     mouse_moved(0, x, y, rel)
 
 def key(code, length=0):
-    key_pressed(1, code)
+    key_press(code)
     time.sleep(length)
-    key_released(1, code)
+    key_release(code)

@@ -53,10 +53,13 @@ class Client:
         except (ConnectionRefusedError, OSError) as e:
             return self.close(e) # close the socket as it could not connect
         id = self.recv() # get the id from server
+        print(id)
         self.id = int(id[1]) if id[0] == "ID" else -1 # check the id sent is an id
+        print(self.id)
         if self: # if the id is valid (therefore there is a connection)
-            self.password()
             self.encryption() # perform a diffe-helman if necessary
+            if not self.password_check():
+                raise ValueError("Incorrect Password")
             _thread.start_new_thread(self._recv_loop, tuple()) # start the recv_loop in a new thread so it is always listening
         else:
             return self.close(ConnectionRefusedError("Server sent no ID"))
@@ -68,16 +71,18 @@ class Client:
             self.socket.close() # close the socket connection
             return err # return an error if one was given
         except (ConnectionError, OSError) as e:
-            raise # rasies an error if close if called twice in a row
+            raise # rasies an error if close is called twice in a row
 
     @CON_ERR
     def send(self, message, *prefixes): # message - What is being sent, prefixes - The prefixes e.g. BIN, RLY, PASS, CMD, ERR, DATA
         """Sends the data to the server with the prefixes for sorting the sent data"""
+        print(message, *prefixes)
         prefixes = ("<"+"".join((str(i).upper() for i in prefixes))+">").encode("utf-8") # all the prefixes in uppercase in one string then encoded
         message = message if b"BIN" in prefixes else str(message).encode("utf-8") # the message is encoded if "BIN" is not found in the prefixes
         data = prefixes+message # adds the prefixes and message into one stream of bytes
         if self.encrypt: # if the data needs to be encrypted
             data = crypt.encode(data, self.sk, False) # bytes([i ^ self.sk for i in data]) # performs a XOR on the data using the private key
+        print(data)
         self.socket.send(data) # sends the data to the server
 
     @CON_ERR
@@ -86,6 +91,7 @@ class Client:
         data = b""
         while data == b"": # makes sure the data is not empty
             data = self.socket.recv(self._size)
+        print(data)
         if self.encrypt: # decrypts if necessary
             data = crypt.decode(data, self.sk, False) # bytes([i ^ self.sk for i in data])
         prefixes = data[1:data.index(b">")].decode("utf-8") # seperates the prefixes from the message
@@ -132,13 +138,16 @@ class Client:
             self.received.remove(message)
         return messages # return the chosen messages
 
-    def password(self):
+    def password_check(self):
         data = self.data("PWD")[0]
         if data[1] == "True":
             pw = hashes.hmac(self.password, self.id)
             self.send(pw, "PWD", "BIN")
+            return self.data("PWD")[0][1] == "True"
+        return True
 
     def encryption(self):
+        print("ENTCYPTION TIME")
         data = self.data("CRT") # recv the keys and g**B % p from the server
         self.helman = {k : v for k,v in zip(("g", "p"), (int(i) for i in data[1].split("-")))} # save the public keys
         if data[0] == "CRT" and data[1].split("-")[2] != "False": # if the server is setup for encryption

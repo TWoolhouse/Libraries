@@ -25,12 +25,7 @@ class Client:
         self._size = 4096
         self.received = [] # data that has been received and is not an in built prefix
 
-        self.server._add_connection(self)
-        self.send(self.id, "ID") # sends the ID of the Client for setup
-        self.password()
-        self.encryption()
-
-        self._recv_loop()
+        self.open()
 
     def __str__(self):
         return "{} [{}:{}]{}".format(self.id, self.addr, self.port, " -> "+str(self.target) if self.target != -1 else "")
@@ -38,6 +33,14 @@ class Client:
     def __bool__(self):
         """Is False if the id is inactive so the connection is not up"""
         return self.id != -1
+
+    def open(self):
+        self.server._add_connection(self)
+        self.send(self.id, "ID") # sends the ID of the Client for setup
+        self.encryption()
+        self.password_check()
+
+        self._recv_loop()
 
     def close(self, err=None):
         """Closes connection with the Client"""
@@ -53,16 +56,19 @@ class Client:
     @CON_ERR
     def send(self, message, *prefixes): # message - What is being sent, prefixes - The prefixes e.g. BIN, RLY, PASS, CMD, ERR, DATA
         """Sends the data to the server with the prefixes for sorting the sent data"""
+        print(message, *prefixes)
         prefixes = ("<"+"".join((str(i).upper() for i in prefixes))+">").encode("utf-8") # all the prefixes in uppercase in one string then encoded
         message = message if b"BIN" in prefixes else str(message).encode("utf-8") # the message is encoded if "BIN" is not found in the prefixes
         data = prefixes+message # adds the prefixes and message into one stream of bytes
         if self.server.encrypt: # if the data needs to be encrypted
             data = crypt.encode(data, self.sk, False) # bytes([i ^ self.sk for i in data]) # performs a XOR on the data using the private key
+        print(data)
         self.socket.send(data) # sends the data to the Client
     @CON_ERR
     def recv(self):
         """Recives the data from the Client and unpacks the data into prefixes and the message"""
         data = b""
+        print(data)
         while data == b"": # makes sure the data is not empty
             data = self.socket.recv(self._size)
         if self.server.encrypt: # decrypts if necessary
@@ -112,24 +118,24 @@ class Client:
             self.received.remove(message)
         return messages # return the chosen messages
 
-    def password(self):
+    def password_check(self):
         if self.server.password:
             pw = hashes.hmac(self.server.password, self.id)
             self.send("True", "PWD", "BIN")
             if pw != self.data("PWD")[0]:
                 self.close()
+            else:
+                self.send("True", "PWD")
         else:
             self.send("False", "PWD")
 
     def encryption(self):
+        print("ENCRYPT TIME")
         pk = secrets.randbelow(4096) # generate a private key
         self.send("-".join((str(self.server.helman["g"]), str(self.server.helman["p"]), str(self.server.helman["g"]**pk % self.server.helman["p"]) if self.server.encrypt else "False")), "CRT") # sends the public keys and g**B % p if the server is setup to encrypt
         if self.server.encrypt: # if the server is set to encrypt wait for the key from Client
-            data = self.recv() # recv g**A % p from the Client
-            if data[0] == "CRT":
-                self.sk = (int(data[1])**pk % self.helman["p"]) # calculate the shared private key
-            else:
-                self.close() # close if you do not recv the key
+            data = self.data("CRT") # recv g**A % p from the Client
+            self.sk = (int(data[1])**pk % self.helman["p"]) # calculate the shared private key
 
     def relay(self, id):
         try:    id = int(id) # check the id is a num
@@ -171,6 +177,9 @@ class Server:
 
     def __str__(self):
         return "[{}:{}] {} :{}".format(self.addr if self.addr else "*.*.*.*", self.port, self.active, "\n\t"+("\n\t".join((str(i) for i in self.connections.values()))))
+
+    def __bool__(self):
+        return self.active
 
     def __getitem__(self, key):
         return self.connections[key]
