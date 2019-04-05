@@ -98,7 +98,6 @@ class Media:
 
     def pause(self):
         sinput.key(sinput.VK.MEDIA_PLAY_PAUSE)
-        print("PLAY/PAUSE")
     play = pause
 
     def next(self):

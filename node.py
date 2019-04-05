@@ -33,7 +33,7 @@ class CloseError(Exception):
 
 class Node:
 
-    def __init__(self, c_socket, addr="127.0.0.1", port=80, id=-1, password=None, encrypt=0, funcs={}, commands=None, size=4096, workers={"handle":1}):
+    def __init__(self, c_socket, addr="127.0.0.1", port=80, id=-1, password=None, encrypt=0, funcs={}, callbacks={}, commands=None, size=4096, workers={"handle":1}):
         self.addr = addr # IPv4 Address
         self.port = port # Port Number
         self.id = id # ID -1 means the socket is inactive
@@ -46,7 +46,8 @@ class Node:
         }
 
         self.commands = {
-        "internal": {str(k).upper() : funcs[k] for k in funcs}, # the functions that get called upon certain prefixes being received
+        "internal": funcs,
+        "callback": {str(k).upper() : callbacks[k] for k in callbacks}, # the functions that get called upon certain prefixes being received
         "external": commands if type(commands).__name__ == "module" else (importlib.import_module(str(commands)) if commands else None), # the module that commands can be found in
         }
 
@@ -187,12 +188,14 @@ class NodeClient(Node):
                 if (len(args) == 1) and (args[0] == "NULL"):    args = [] # if there are no args, pass empty list
                 try:    return self.process(getattr(self, command), *args) # try Client functions
                 except AttributeError:  pass # do nothing
+                if command in self.commands["internal"]:
+                    return self.process(self.commands["internal"][command], self, *args)
                 if self.commands["external"] != None: # only if there is a module
                     return self.process(getattr(self.commands["external"], command), self, *args) # call the function with arguments (passes self as it is not a member function)
             except (IndexError, TypeError, AttributeError) as e: # make sure the command exists
                 return self.err(AttributeError("Command Not Found"))
         else: # any other type of data
-            try:    self.process(self.commands["internal"][[prefix for prefix in self.commands["internal"].keys() if prefix in data[0]][0]], self, data) # run the first function with the right prefix
+            try:    self.process(self.commands["callback"][[prefix for prefix in self.commands["callback"].keys() if prefix in data[0]][0]], self, data) # run the first function with the right prefix
             except IndexError:  self.handled.append(data) # add it to the buffer
 
     def data(self, *prefixes, res=False):
@@ -205,6 +208,9 @@ class NodeClient(Node):
         for message in messages: # remove all of the chosen messages from the buffer
             self.handled.remove(message)
         return messages # return the chosen messages
+
+    def cmd(self, command, *args, tags=()):
+        self.send("{} >> {}".format(command, " >> ".join((str(i) for i in args)) if args else "NULL"), *tags, "CMD")
 
     def _worker_recv_loop(self):
         while self.id != -1: # while the connection is active
@@ -234,8 +240,8 @@ class NodeClient(Node):
 
 class Client(NodeClient):
 
-    def __init__(self, addr="127.0.0.1", port=80, id=-1, password=None, encrypt=0, funcs={}, commands=None, size=4096, workers={"handle":1, "process":1}):
-        super().__init__(socket.socket(), addr, port, id, password, encrypt, funcs, commands, size, workers=workers)
+    def __init__(self, addr="127.0.0.1", port=80, id=-1, password=None, encrypt=0, funcs={}, callbacks={}, commands=None, size=4096, workers={"handle":1, "process":1}):
+        super().__init__(socket.socket(), addr, port, id, password, encrypt, funcs, callbacks, commands, size, workers=workers)
 
     @log_err
     def open(self):
@@ -256,7 +262,7 @@ class SClient(NodeClient):
     def __init__(self, c_socket, addr, server, workers):
         super().__init__(c_socket, addr[0], server.port, addr[1],
         server.security["password"], server.security["encrypt"],
-        server.commands["internal"], server.commands["external"], server._size, workers=workers)
+        server.commands["internal"], server.commands["callback"], server.commands["external"], server._size, workers=workers)
         self.server = server
         self.open()
 
@@ -273,8 +279,8 @@ class SClient(NodeClient):
 
 class Server(Node):
 
-    def __init__(self, addr="", port=80, limit=10, password=None, encrypt=0, commands=None, workers={"handle":1, "c_handle":1, "c_process":1}, **funcs):
-        super().__init__(socket.socket(), addr, port, password=password, encrypt=encrypt, funcs=funcs, commands=commands, workers=workers)
+    def __init__(self, addr="", port=80, limit=10, password=None, encrypt=0, funcs={}, callbacks={}, commands=None, workers={"handle":1, "c_handle":1, "c_process":1}):
+        super().__init__(socket.socket(), addr, port, password=password, encrypt=encrypt, funcs=funcs, callbacks=callbacks, commands=commands, workers=workers)
         self.limit = limit
         self.security["g"] = 2 # diffe-helman
         self.security["p"] = 2 # diffe-helman
