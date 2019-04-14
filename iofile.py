@@ -123,15 +123,14 @@ class sql(BaseClass):
             c = file.cursor()
             return c.execute(text)
 
-    def insert(file_name, table, *arguments, parameters=(),ext="db"):
+    def insert(file_name, table, *arguments, parameters=(), ext="db"):
         with sqlite3.connect("{}{}.{}".format(PATH, file_name, ext)) as file:
             c = file.cursor()
-            #command = "INSERT INTO {} {} VALUES ({})".format(table, ("("+(", ".join(parameters))+")" if parameters else ""), ", ".join(("?" for i in range(len(arguments)))))
             return c.execute("INSERT INTO {} {} VALUES ({})".format(table, ("("+(", ".join(parameters))+")" if parameters else ""), ", ".join(("?" for i in range(len(arguments))))), arguments)
 
     def select(file_name, table, *parameters, cols="*", conditional=None, all=True, ext="db"):
         with sqlite3.connect("{}{}.{}".format(PATH, file_name, ext)) as file:
             c = file.cursor()
-            #command = "SELECT {} FROM {}{}".format(cols, table, "" if conditional == None else " WHERE {}".format(conditional))
+            # print(parameters, cols, conditional)
             c.execute("SELECT {} FROM {}{}".format(cols, table, "" if conditional == None else " WHERE {}".format(conditional)), parameters)
             return c.fetchall() if all else c.fetchone()
