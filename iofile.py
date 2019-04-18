@@ -131,6 +131,10 @@ class sql(BaseClass):
     def select(file_name, table, *parameters, cols="*", conditional=None, all=True, ext="db"):
         with sqlite3.connect("{}{}.{}".format(PATH, file_name, ext)) as file:
             c = file.cursor()
-            # print(parameters, cols, conditional)
             c.execute("SELECT {} FROM {}{}".format(cols, table, "" if conditional == None else " WHERE {}".format(conditional)), parameters)
             return c.fetchall() if all else c.fetchone()
+
+    def update(file_name, table, arguments={}, parameters=(), conditional=None, ext="db"):
+        with sqlite3.connect("{}{}.{}".format(PATH, file_name, ext)) as file:
+             c = file.cursor()
+             return c.execute("UPDATE {} SET {}{}".format(table, "".join("{} = {}".format(k, v) for k,v in arguments), "" if conditional == None else " WHERE {}".format(conditional)), parameters)
