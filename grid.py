@@ -2,10 +2,10 @@ from vector import Vector
 
 class Dimension:
 
-    def __init__(self, length, sub, init_val=None):
+    def __init__(self, length, sub, val=None):
         self.length = length[0]
         if sub <= 0:
-            self.storage = [init_val for i in range(self.length)]
+            self.storage = [val() for i in range(self.length)] if isinstance(val, type) else [val for i in range(self.length)]
         else:
             self.storage = [Dimension(length[1:], sub-1) for i in range(self.length)]
 
@@ -64,10 +64,10 @@ class Dimension:
 class Grid(Dimension):
     """A fixed N-th Dimensional array"""
 
-    def __init__(self, *size, init_val=None):
+    def __init__(self, *size, val=None):
         """Size of each Dimension. init_val is set to None by default"""
         self.size = Vector(*size)
-        self.storage = [Dimension(self.size[1:], len(self.size)-2, init_val=init_val) for i in range(self.size[0])]
+        self.storage = [Dimension(self.size[1:], len(self.size)-2, val=val) for i in range(self.size[0])]
 
     def __repr__(self):
         return "{} {}".format(self.size, self.storage)

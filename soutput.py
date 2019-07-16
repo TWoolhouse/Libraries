@@ -1,4 +1,5 @@
 import msvcrt
+import keys
 
 def kbfunc():
     if msvcrt.kbhit():

@@ -1,4 +1,6 @@
 import tkinter as tk
+import tkinter.messagebox as tkm
+import tkinter.simpledialog as tkd
 
 class Window(tk.Tk):
     """Tk root Window"""
@@ -85,10 +87,42 @@ class Page(tk.Frame):
     def update(self):
         pass
 
-def Cmd(func, *options):
+class Dialog(tkd.Dialog):
+    def __init__(self, parent, title="Dialog", **inputs):
+        self.inputs = inputs
+        super().__init__(parent, title.title())
+
+    def body(self, master):
+
+        self.entries = []
+
+        for i,k in enumerate(self.inputs.items()):
+            tk.Label(master, text=str(k[0]).title()).grid(row=i)
+            e = tk.Entry(master)
+            e.grid(row=i, column=1)
+            self.entries.append((e, k[1]))
+
+        return self.entries[0][0]
+
+    def validate(self):
+        _res = []
+        for e,t in self.entries:
+            try:
+                if t:
+                    _res.append(t(e.get()))
+                else:
+                    _res.append(e.get())
+            except ValueError:
+                tkm.showwarning("Bad input", "Illegal values\nPlease try again")
+                return 0
+
+        self.result = _res
+        return 1
+
+def cmd(func, *options, **kwoptions):
     """Takes a function followed by its arguments"""
     def wrapper(*args, **kwargs):
-        return func(*options)
+        return func(*options, **kwoptions)
     return wrapper
 
 if __name__ == "__main__":

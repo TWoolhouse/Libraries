@@ -17,25 +17,36 @@ class Vector(object):
     def __len__(self): #allows len
         return len(self.values)
 
+    def __hash__(self):
+        return self.values.__hash__()
+
     def __getitem__(self, key): #allows indexing
         return self.values[key]
 
+    def __eq__(self, other):
+        if isinstance(other, Vector):
+            return all((a == b for a,b in zip(self, other)))
+
+    def __ne__(self, other):
+        if isinstance(other, Vector):
+            return not all((a == b for a,b in zip(self, other)))
+
     def __add__(self, other): #can add
-        if type(other) == type(self): #only allows other Vectors
+        if isinstance(other, Vector): #only allows other Vectors
             return Vector(*(a + b for a, b in zip(self, other)))
         else:   raise TypeError(self.opp_err("+", other))
 
     def __sub__(self, other): #can subtract
-        if type(other) == type(self): #only allows other Vectors
+        if isinstance(other, Vector): #only allows other Vectors
             return Vector(*(a - b for a, b in zip(self, other)))
         else:   raise TypeError(self.opp_err("-", other))
 
     def __mul__(self, other): #can multiply
-        if type(other) in (int, float): #scalar multiplication
+        if isinstance(other, (int, float)): #scalar multiplication
             return Vector(*(a * other for a in self))
-        elif type(other) == type(self): #two Vectors
+        elif isinstance(other, Vector): #two Vectors
             return self._dot_mul(other)
-        elif (type(other) == list) or (type(other).__name__ == "Matrix"):
+        elif isinstance(other, list) or (type(other).__name__ == "Matrix"):
             return self._matrix_mul(other)
         else:   raise TypeError(self.opp_err("*", other))
 
@@ -43,17 +54,17 @@ class Vector(object):
         return self.__mul__(other)
 
     def __truediv__(self, other): #division with /
-        if type(other) in (int, float): #only with a scalar
+        if isinstance(other, (int, float)): #only with a scalar
             return Vector(*(a / other for a in self))
         else:   raise TypeError(self.opp_err("/", other))
 
     def __floordiv__(self, other): #division with //
-        if type(other) in (int, float): #only with a scalar
+        if isinstance(other, (int, float)): #only with a scalar
             return Vector(*(a // other for a in self))
         else:   raise TypeError(self.opp_err("//", other))
 
     def __mod__(self, other):
-        if type(other) in (int, float): #only with a scalar
+        if isinstance(other, (int, float)): #only with a scalar
             return Vector(*(a % other for a in self))
         else:   raise TypeError(self.opp_err("%", other))
 
@@ -72,7 +83,7 @@ class Vector(object):
 
     def rotate(self, other):
         """Takes an angle in degrees and rotates in 2D. It can also take a matrix and use that as a rotation matrix"""
-        if type(other) in (int, float):
+        if isinstance(other, (int, float)):
             return self._rotate2D(other)
         else:
             return self._matrix_mul(other)
@@ -84,7 +95,7 @@ class Vector(object):
 
     def mag(self):
         """Returns the magnitude of the Vector"""
-        return sqrt(sum([a**2 for a in self]))
+        return sqrt(sum(a**2 for a in self))
 
     def dist(self, other): #distance between 2 vectors
         """Returns the distance between itself and another Vector"""
