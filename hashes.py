@@ -3,7 +3,7 @@ import hashlib
 def byte(arg):
     return arg if type(arg) == bytes else str(arg).encode("utf-8")
 
-def new(name, *data):
+def new(name="sha256", *data):
     h = hashlib.new(name)
     for d in data:
         h.update(byte(d))

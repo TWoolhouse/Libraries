@@ -57,29 +57,3 @@ class Random(random.Random):
 
     def dsave(self, after=True):
         save(self, after)
-
-# def load(state, s=None):
-#     def load_state(func):
-#         if isinstance(state, dict):
-#             def load_state(*args, **kwargs):
-#                 random.setstate(state[s])
-#                 return func(*args, **kwargs)
-#         else:
-#             def load_state(*args, **kwargs):
-#                 random.setstate(state)
-#                 return func(*args, **kwargs)
-#         return load_state
-#     return load_state
-#
-# def save(state=None, s=None):
-#     def save_state(func):
-#         if isinstance(state, dict):
-#             def save_state(*args, **kwargs):
-#                 state[s] = random.getstate()
-#                 return func(*args, **kwargs)
-#         else:
-#             def save_state(*args, **kwargs):
-#                 func(*args, **kwargs)
-#                 return random.getstate()
-#         return save_state
-#     return save_state

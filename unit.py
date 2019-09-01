@@ -15,21 +15,21 @@ class Unit:
 
     def __init__(self, num=0, unit="Unit"):
         self.num, self.unit = num, unit
-        self.conversion = self.get_conversion()
+        self.conversion = self.get_conversion(self.unit)
         self.value = self.num*self.conversion
 
     def __repr__(self):
         return "{} {}".format(self.num, self.unit)
 
-    def get_conversion(self):
+    def get_conversion(self, unit):
         type_key = convert[type(self).__name__]
-        if self.unit in type_key:
-            return type_key[self.unit]
+        if unit in type_key:
+            return type_key[unit]
         si_t = ((si+t, SI[si]*type_key[t]) for t in type_key for si in SI)
         for i in si_t:
-            if i[0] == self.unit:
+            if i[0] == unit:
                 return i[1]
-        raise ValueError("'{}' is not a recognised unit".format(self.unit))
+        raise ValueError("'{}' is not a recognised unit".format(unit))
 
     def convert(self, value):
         return self.__class__(value/self.conversion, self.unit)
@@ -40,6 +40,15 @@ class Unit:
         return int(self.value)
     def __str__(self):
         return str(self.num)+" "+str(self.unit)
+
+    def __getitem__(self, unit):
+        return self.__class__(self.value/self.get_conversion(unit), unit)
+
+    def __call__(self, unit):
+        self.unit = unit
+        self.conversion = self.get_conversion(self.unit)
+        self.num = self.value / self.conversion
+        return self
 
     def __add__(self, other):
         return self._operation("__add__", other)

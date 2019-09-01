@@ -5,7 +5,7 @@ import tkinter.simpledialog as tkd
 class Window(tk.Tk):
     """Tk root Window"""
 
-    def __init__(self, title="Title", x=800, y=800, font="TkDefaultFont"):
+    def __init__(self, title="Title", x=800, y=800, font="TkDefaultFont", parent=None):
         """Title and Geometry """
         super().__init__()
         self.title(title)
@@ -17,6 +17,7 @@ class Window(tk.Tk):
         self.option_add("*Font", font)
         self.pages = {}
         self.active = None
+        self.parent = parent
 
     def show_page(self, page):
         """Takes a name and raises the Page to the front and calls Page.show()"""
@@ -121,9 +122,9 @@ class Dialog(tkd.Dialog):
 
 def cmd(func, *options, **kwoptions):
     """Takes a function followed by its arguments"""
-    def wrapper(*args, **kwargs):
+    def command(*args, **kwargs):
         return func(*options, **kwoptions)
-    return wrapper
+    return command
 
 if __name__ == "__main__":
     app = Window("Test App")
