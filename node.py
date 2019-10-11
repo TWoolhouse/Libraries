@@ -351,6 +351,8 @@ class Server(Node):
 
     def _add_connection(self, client):
         self.connections[client.id] = client
+        for c in list(self.connections.values()):
+            c.send("", "PASS")
     def _remove_connection(self, id):
         if id != -1:
             del self.connections[id]
