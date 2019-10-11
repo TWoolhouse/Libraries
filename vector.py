@@ -1,6 +1,7 @@
 from math import radians, sin, cos, sqrt
 
 class Vector(object):
+    """Simple N Component Vector"""
 
     def __init__(self, *values):
         if len(values) == 0:
@@ -121,6 +122,16 @@ class Vector(object):
         if self.mag() > lim:
             self.values = tuple(self.norm()*lim)
         return self
+
+    def map(self, other):
+        """Multiplies each component with the corrosponding component of other"""
+        return self.__class__(*(self[i] * other[i] for i in range(len(self))))
+
+    def contrain(self, s1, e1, s2, e2):
+        """Resizes the Vector to be scaled within the args"""
+        if all(map(lambda x: isinstance(x, self.__class__) and len(x) == len(self), (s1, e1, s2, e2))):
+            return self.__class__(*( ((self[i] - s1[i]) / (e1[i] - s1[i])) * (e2[i] - s2[i]) + s2[i] for i in range(len(self)) ))
+        raise TypeError("Args must be Vectors of same length as self")
 
     def opp_err(self, opp, b):
         return "unsupported operand type(s) for {}: '{}' and '{}'".format(\

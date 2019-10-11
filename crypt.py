@@ -12,8 +12,8 @@ def decrypt_bytes(message, key):
     return encrypt_bytes(message, key[::-1])
 
 def encrypt(message, key, decode=True):
-    msg = encrypt_bytes(message if type(message) == bytes else str(message).encode("utf-8"), key if type(key) == bytes else str(key).encode("utf-8"))
+    msg = encrypt_bytes(message if isinstance(message, bytes) else str(message).encode("utf-8"), key if isinstance(key, bytes) else str(key).encode("utf-8"))
     return msg.decode("utf-8") if decode else msg
 
 def decrypt(message, key, decode=True):
-    return encrypt(message, key[::-1], decode)
+    return encrypt(message, key, decode)

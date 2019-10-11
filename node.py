@@ -33,7 +33,7 @@ class CloseError(Exception):
 
 class Node:
 
-    def __init__(self, c_socket, addr="127.0.0.1", port=80, id=-1, password=None, encrypt=0, funcs={}, callbacks={}, commands=None, size=4096, workers={"handle":1}):
+    def __init__(self, c_socket, addr="127.0.0.1", port=80, id=-1, password=None, encrypt=False, funcs={}, callbacks={}, commands=None, size=4096, workers={"handle":1}):
         self.addr = addr # IPv4 Address
         self.port = port # Port Number
         self.id = id # ID -1 means the socket is inactive
@@ -42,7 +42,7 @@ class Node:
 
         self.security = {
         "password": hashes.hmac(password, password) if password else None, # Password for the initial connection
-        "encrypt": encrypt, # The secret key for encryption, if any
+        "encrypt": str(encrypt) , # The secret key for encryption
         }
 
         self.commands = {
@@ -96,6 +96,7 @@ class Node:
                 t.start()
 
     def open(self):
+        """Open the connection"""
         self.start()
 
     @log_err
@@ -112,6 +113,13 @@ class Node:
         pass
     def _worker_handle(self):
         pass
+
+    def __enter__(self):
+        self.open()
+        return self
+    def __exit__(self, *args):
+        self.close()
+        return self
 
 class NodeClient(Node):
 
@@ -158,27 +166,25 @@ class NodeClient(Node):
         prefixes = ("<"+"|".join((str(i).upper() for i in prefixes))+">").encode("utf-8") # all the prefixes in uppercase in one string then encoded
         message = message if b"BIN" in prefixes else str(message).encode("utf-8") # the message is encoded if "BIN" is not found in the prefixes
         data = prefixes+message # adds the prefixes and message into one stream of bytes
-        if self.security["encrypt"]: # if the data needs to be encrypted
-            data = crypt.encode(data, self.security["encrypt"], False) # performs a XOR on the data using the private key
-        self.socket.send(data) # sends the data to the server
+        data = crypt.encrypt(data, self.security["encrypt"], False) # performs a XOR on the data using the private key
+        self.socket.send(data+b"<|>") # sends the data to the server
 
     @con_err
     @log_err
-    def recv(self):
+    def recv(self, data=b""):
         """Recives the data from the Server and unpacks the data into prefixes and the message"""
-        data = b""
-        while data == b"": # makes sure the data is not empty
+        while b"<|>" not in data: # makes sure the data is not empty
             data = self.socket.recv(self._size)
-        if self.security["encrypt"]: # decrypts if necessary
-            data = crypt.decode(data, self.security["encrypt"], False) # performs a XOR on the data using the private key
+        data, old = data.split(b"<|>", 1)
+        data = crypt.decrypt(data, self.security["encrypt"], False) # performs a XOR on the data using the private key
         prefixes = data[1:data.index(b">")].decode("utf-8") # seperates the prefixes from the message
         message = data[data.index(b">")+1:] if "BIN" in prefixes else data[data.index(b">")+1:].decode("utf-8")
-        return prefixes, message # returns a tuple with the prefixes and the message
+        return old, prefixes, message # returns a tuple with the prefixes and the message
 
     @log_err
     def handle(self, data):
         if data[0][:3] == "RLY": # if the data needs to be relayed
-            self.process(self.send, data[1], data[0][3:]) # sends it on back to the server
+            self.process(self.send, data[1], data[0][3:]) # sends it on back to the sender
         elif "PASS" in data[0]: # if prefix has "PASS" then do nothing
             return None
         elif "CMD" in data[0]: # if it's a command
@@ -186,6 +192,7 @@ class NodeClient(Node):
                 command, args = data[1].split(" >> ", 1) # splits up the command into command and args
                 args = args.split(" >> ") # splits the args up seperataly
                 if (len(args) == 1) and (args[0] == "NULL"):    args = [] # if there are no args, pass empty list
+                else:   args = (i if i != "None" else None for i in args)
                 try:    return self.process(getattr(self, command), *args) # try Client functions
                 except AttributeError:  pass # do nothing
                 if command in self.commands["internal"]:
@@ -195,7 +202,7 @@ class NodeClient(Node):
             except (IndexError, TypeError, AttributeError) as e: # make sure the command exists
                 return self.err(AttributeError("Command Not Found"))
         else: # any other type of data
-            try:    self.process(self.commands["callback"][[prefix for prefix in self.commands["callback"].keys() if prefix in data[0]][0]], self, data) # run the first function with the right prefix
+            try:    self.process(self.commands["callback"][[prefix for prefix in self.commands["callback"].keys() if prefix in data[0]][0]], self, data[0].split("|"), data[1]) # run the first function with the right prefix
             except IndexError:  self.handled.append(data) # add it to the buffer
 
     def data(self, *prefixes, res=False):
@@ -213,12 +220,14 @@ class NodeClient(Node):
         self.send("{} >> {}".format(command, " >> ".join((str(i) for i in args)) if args else "NULL"), *tags, "CMD")
 
     def _worker_recv_loop(self):
-        while self.id != -1: # while the connection is active
-            data = self.recv() # recv data
-            if isinstance(data, Exception): # make sure the connection didn't errror
-                self.err(data)
-            else:
-                self.queues["received"].put(data) # add the data to the queue to be handled by another thread
+        data = b""
+        while self.id != -1:  # while the connection is active
+            res = self.recv(data) # recv data
+            if isinstance(res, Exception): # make sure the connection didn't errror
+                self.err(res)
+            elif res:
+                data = res[0]
+                self.queues["received"].put(res[1:]) # add the data to the queue to be handled by another thread
 
     def _worker_handle(self):
         while self.id != -1: # while the connection is active
@@ -240,7 +249,7 @@ class NodeClient(Node):
 
 class Client(NodeClient):
 
-    def __init__(self, addr="127.0.0.1", port=80, id=-1, password=None, encrypt=0, funcs={}, callbacks={}, commands=None, size=4096, workers={"handle":1, "process":1}):
+    def __init__(self, addr="127.0.0.1", port=80, id=-1, password=None, encrypt=False, funcs={}, callbacks={}, commands=None, size=4096, workers={"handle":1, "process":1}):
         super().__init__(socket.socket(), addr, port, id, password, encrypt, funcs, callbacks, commands, size, workers=workers)
 
     @log_err
@@ -251,7 +260,7 @@ class Client(NodeClient):
         except (ConnectionRefusedError, OSError) as e:
             raise self.close(e) # close the socket as it could not connect
         id = self.recv() # get the id from server
-        self.id = int(id[1]) if id[0] == "ID" else -1 # check the id sent is an id
+        self.id = int(id[2]) if id[1] == "ID" else -1 # check the id sent is an id
         if self.id != -1: # if the id is valid (therefore there is a connection)
             super().open()
         else:
@@ -279,12 +288,13 @@ class SClient(NodeClient):
 
 class Server(Node):
 
-    def __init__(self, addr="", port=80, limit=10, password=None, encrypt=0, funcs={}, callbacks={}, commands=None, workers={"handle":1, "c_handle":1, "c_process":1}):
+    def __init__(self, addr="", port=80, limit=10, password=None, encrypt=False, funcs={}, callbacks={}, commands=None, workers={"handle":1, "c_handle":1, "c_process":1}, connection=None):
         super().__init__(socket.socket(), addr, port, password=password, encrypt=encrypt, funcs=funcs, callbacks=callbacks, commands=commands, workers=workers)
         self.limit = limit
         self.security["g"] = 2 # diffe-helman
         self.security["p"] = 2 # diffe-helman
         self.connections = {} # a dict of all current connections
+        self.callback = (lambda client: None) if connection is None else connection
 
     def __repr__(self):
         return "{}\n\nSecurity: {}\nCommands: {}\nQueues: {}\nWorkers: {}\nThreads: {} - {}\nConnections: {}\n\n{}".format(
@@ -335,7 +345,7 @@ class Server(Node):
             try:
                 data = self.queues["received"].get(timeout=1)
                 if data:
-                    SClient(*data, self, {k[2:] : self.workers[k] for k in self.workers if k[:2] == "c_"})
+                    self.callback(SClient(*data, self, {k[2:] : self.workers[k] for k in self.workers if k[:2] == "c_"}))
                 self.queues["received"].task_done()
             except queue.Empty: pass
 
