@@ -46,7 +46,8 @@ class Sql:
 
     def selectID(self, table: str, *conditions: Condition, all=False) -> int:
         """Return ID of Row"""
-        return self.select(table, *conditions, columns=("id",), all=all)[0]
+        res = self.select(table, *conditions, columns=("id",), all=all)
+        return res[0] if res else False
 
     def select(self, table: str, *conditions: Condition, columns:tuple=("*",), all=True) -> tuple:
         """Return Columns if Condition is Met"""
