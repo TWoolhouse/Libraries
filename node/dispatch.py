@@ -1,5 +1,9 @@
-from _node.data import Data
-from _node import error
+from node.data import Data
+from node import error
+
+__all__ = ["Dispatch"]
+
+class Node: pass
 
 def handle(func: callable, output, end):
     if output:
@@ -35,21 +39,23 @@ def handle(func: callable, output, end):
 
 class Dispatch:
 
-    def __init__(self, node, data: Data):
+    def __init__(self, node: Node, data: Data):
         self.node = node
         self.data = data
 
-    def __init_subclass__(cls, output: bool=False, end: (bool, None)=True):
+    def __init_subclass__(cls, output: bool=False, end: (bool, None)=True, node: Node=None):
         cls.__init__ = super().__init__
-        cls.handle = handle(cls.handle, output, end)
+        cls.handle = handle(error.dispatch(cls.handle), output, end)
+        if node is not None:
+            node._dispatchers[cls.__name__] = cls
 
     def handle(self):
-        raise error.DispatchError(self.node, self.__class__)
+        raise TypeError("Not a Valid Dispatcher")
 
 class PASS(Dispatch):
 
     def handle(self):
-        pass
+        raise ValueError("Error")
 
 class CLOSE(Dispatch):
 

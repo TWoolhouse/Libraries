@@ -1,6 +1,4 @@
-import queue
-
-__all__ = ["CloseError", "RemoteError"]
+__all__ = ["CloseError", "RemoteError", "DispatchError"]
 
 class NodeBaseError(Exception):
 
@@ -43,31 +41,14 @@ class RemoteError(NodeBaseError):
         return "{}".format(self.msg)
 
 class DispatchError(NodeBaseError):
-    def __init__(self, node, cls):
+    def __init__(self, node, cls, msg="Failed to Handle Request"):
         self.cls = cls
+        self.msg = msg
 
     def __str__(self):
-        return "'{}' is not a Valid Dispatcher".format(self.cls)
+        return "'{}' -> {}".format(self.cls, self.msg)
 
-def close_err(func):
-    def close_error(node, *args, **kwargs):
-        try:
-            return func(node, *args, **kwargs)
-        except CloseError as e:
-            return e
-    return close_error
-
-def con_err(func):
-    """Close Node on Network Errors"""
-    def connection_error(node, *args, **kwargs):
-        try:
-            return func(node, *args, **kwargs)
-        except (ConnectionError, OSError) as e:
-            node.close()
-            raise CloseError(node) from e
-    return connection_error
-
-def log_err(func):
+def log(func):
     """Append Error to Node Error Queue and Re-Raise Error"""
     def log_error(node, *args, **kwargs):
         try:
@@ -77,13 +58,20 @@ def log_err(func):
             raise
     return log_error
 
-def que_err(func):
-    def queue_error(*args, **kwargs):
-        try:
-            func(*args, **kwargs)
-        except queue.Empty:
-            pass
-    return queue_error
+def handle(err: Exception, code: NodeBaseError=None, logging=True, close=False):
+    def handle_error(func):
+        def handle_error(node, *args, **kwargs):
+            try:
+                return func(node, *args, **kwargs)
+            except err as e:
+                if code is True:
+                    raise e
+                elif isinstance(code, Exception):
+                    raise code(node) from e
+                if close:
+                    node.close()
+        return log(handle_error) if logging else handle_error
+    return handle_error
 
 def con_active(func):
     """Call Func if Node is Active"""
@@ -92,3 +80,12 @@ def con_active(func):
             return func(node, *args, **kwargs)
         raise CloseError(node)
     return connection_active
+
+def dispatch(func):
+    def dispatcher(dispatcher):
+        try:
+            func(dispatcher)
+        except Exception as e:
+            msg = "'{}': {}".format(type(e), e)
+            raise DispatchError(dispatcher.node, dispatcher.__class__, msg).with_traceback(e.__traceback__) from None
+    return dispatcher
