@@ -1,17 +1,11 @@
-def encrypt_bytes(message, key):
-    output = []
+def encrypt_bytes(message: bytes, key: bytes):
 
-    for c in message:
-        for k in key:
-            c = c ^ k
-        output.append(c)
+    key *= len(message) // len(key) + 1
+    return bytes((m ^ k for m,k in zip(message, key)))
 
-    return bytes(output)
+decrypt_bytes = encrypt_bytes
 
-def decrypt_bytes(message, key):
-    return encrypt_bytes(message, key[::-1])
-
-def encrypt(message, key, decode=True):
+def encrypt(message, key, decode=False):
     msg = encrypt_bytes(message if isinstance(message, bytes) else str(message).encode("utf-8"), key if isinstance(key, bytes) else str(key).encode("utf-8"))
     return msg.decode("utf-8") if decode else msg
 

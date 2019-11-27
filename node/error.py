@@ -46,7 +46,7 @@ class DispatchError(NodeBaseError):
         self.msg = msg
 
     def __str__(self):
-        return "'{}' -> {}".format(self.cls, self.msg)
+        return "'{}' -> {}".format(self.cls.__name__, self.msg)
 
 def log(func):
     """Append Error to Node Error Queue and Re-Raise Error"""
@@ -54,11 +54,12 @@ def log(func):
         try:
             return func(node, *args, **kwargs)
         except Exception as e:
+            print("ERROR:", e)
             node.err(e)
             raise
     return log_error
 
-def handle(err: Exception, code: NodeBaseError=None, logging=True, close=False):
+def handle(err: Exception, code: NodeBaseError=None, close=False):
     def handle_error(func):
         def handle_error(node, *args, **kwargs):
             try:
@@ -70,7 +71,7 @@ def handle(err: Exception, code: NodeBaseError=None, logging=True, close=False):
                     raise code(node) from e
                 if close:
                     node.close()
-        return log(handle_error) if logging else handle_error
+        return handle_error
     return handle_error
 
 def con_active(func):
@@ -86,6 +87,6 @@ def dispatch(func):
         try:
             func(dispatcher)
         except Exception as e:
-            msg = "'{}': {}".format(type(e), e)
+            msg = "'{}': {}".format(e.__class__.__name__, e)
             raise DispatchError(dispatcher.node, dispatcher.__class__, msg).with_traceback(e.__traceback__) from None
     return dispatcher

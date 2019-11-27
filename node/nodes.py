@@ -13,18 +13,21 @@ BUFFER_SIZE = 4096
 
 class Thread:
     def __init__(self, func: callable):
-        self.thread = threading.Thread(target=self.threading(func))
-    def __bool__(self) -> bool:
-        return self.thread.is_alive()
-    def start(self):
+        self.event = threading.Event()
+        self.func = self.threading(func)
+        self.arg = func.__self__
+        self.thread = threading.Thread(target=self.func, args=(self.arg, self.event))
+    def start(self, event):
+        self.event.set()
+        self.event = event
+        self.thread = threading.Thread(target=self.func, args=(self.arg, self.event))
         self.thread.start()
     def threading(self, func: callable) -> callable:
-        @error.log
         @error.handle(error.CloseError, True, close=True)
-        @error.handle(error.DispatchError)
-        def threading(node):
-            while node:
-                func(node)
+        @error.log
+        def threading(node, event):
+            while event.is_set():
+                func()
         return threading
 
 def data_send(data: Data) -> bytes:
@@ -39,13 +42,29 @@ def data_recv(data: bytes) -> Data:
     data = data if b"BIN" in pre else data.decode("utf-8")
     return Data(data, *pre, tags=tag)
 
+def _close_server_client(func, server):
+    def _close(self):
+        r = func(self)
+        server.connections.discard(self)
+        return r
+    return _close
+
+def clear_queue(q: queue.Queue):
+    out = []
+    try:
+        while True:
+            out.append(q.get(False))
+            q.task_done()
+    except queue.Empty:    pass
+    return out
+
 class Node:
 
-    def __init__(self, c_socket: socket.socket, addr: str, port: int, id: int):
+    def __init__(self, c_socket: socket.socket, addr: str, port: int):
         self.c_socket = c_socket
         self.addr = addr
         self.port = port
-        self.id = id
+        self.event = threading.Event()
         self._queues = {
             "send": queue.Queue(),
             "recv": queue.Queue(),
@@ -60,23 +79,22 @@ class Node:
             }
 
     def open(self):
-        self._start()
+        if not self.event.is_set():
+            self.event = threading.Event()
+            self.event.set()
+            clear_queue(self._queues["send"])
+            self._start()
 
     def close(self):
         try:
-            self.id = -1
+            self.event.clear()
             self.c_socket.close()
         except (ConnectionError, OSError):
             pass
 
     @property
     def errors(self):
-        try:
-            while True:
-                self._outputs["error"].append(self._queues["error"].get())
-                self._queues["error"].task_done()
-        except queue.Empty:
-            pass
+        self._outputs["error"].extend(clear_queue(self._queues["error"]))
         return self._outputs["error"]
 
     def err(self, err: error.NodeBaseError) -> error.NodeBaseError:
@@ -84,27 +102,31 @@ class Node:
         return err
 
     def _start(self):
-        for thread in self._threads:
-            if not thread:
-                thread.start()
+        for thread in self._threads.values():
+            thread.start(self.event)
 
-    @error.handle(queue.Empty, logging=False)
+    @error.handle(queue.Empty)
     def _thread_send(self):
-        data = self._queues["send"].get()
-        self._send(data)
-        self._queues["send"].task_done()
+        data = self._queues["send"].get(False)
+        try:
+            self._send(data)
+        finally:
+            self._queues["send"].task_done()
 
     def _thread_recv(self):
         old = b""
         while self:
-            data, old = self._recv(old)
+            res = self._recv(old)
+            if not res:
+                continue
+            data, old = res
             self._queues["recv"].put(data)
 
     def __bool__(self) -> bool:
-        return self.id != -1
+        return self.event.is_set()
 
-    # def __repr__(self) -> str:
-    #     return ""
+    def __repr__(self) -> str:
+        return "[{}:{}] {}".format(self.addr, self.port, "X" if self else "O")
 
     # def __str__(self) -> str:
     #     return ""
@@ -126,24 +148,21 @@ class NodeClient(Node):
             init_subclass(sub_cls, **sub_kwargs)
         cls.__init_subclass__ = classmethod(_init_subclass)
 
-    def __init__(self, c_socket: socket.socket, addr: str, port: int, id: int, dispatchers={}):
-        super().__init__(c_socket, addr, port, id)
+    def __init__(self, c_socket: socket.socket, addr: str, port: int, dispatchers=()):
+        super().__init__(c_socket, addr, port)
         self._queues["handle"] = queue.Queue()
         self._threads["handle"] = Thread(self._thread_handle)
         self._outputs["data"] = []
 
-        self._dispatchers =  {**self._dispatchers, **dispatchers}
+        self._dispatchers =  {**self._dispatchers, **{d.__name__: d for d in dispatchers}}
 
-    def send(self, data: Data):
+    def send(self, data: (str, Data), *prefixes: str, tags: str=()):
+        data = Data(data.data, *prefixes, *data.prefixes, tags=(*tags, *data.tags)) if isinstance(data, Data) else Data(data, *prefixes, tags=tags)
         self._queues["send"].put(data_send(data))
 
     @property
     def output(self):
-        try:
-            while True:
-                self._outputs["data"].append(self._queues["handle"].get())
-                self._queues["handle"].task_done()
-        except queue.Empty:    pass
+        self._outputs["data"].extend(clear_queue(self._queues["handle"]))
         return self._outputs["data"]
 
     def recv(self, *prefixes, tags: tuple=(), wait: int=False) -> [Data,]:
@@ -169,66 +188,78 @@ class NodeClient(Node):
         crypt.decrypt_bytes(data, b"encryption")
         return data, old
 
+    @error.handle(error.DispatchError)
+    @error.log
     def _handle(self, data: Data):
         for prefix in data.prefixes:
             try:
-                if not self._dispatchers[prefix](self, data):
+                if not self._dispatchers[prefix](self, data).handle():
                     return False
             except KeyError:
                 continue
         self._queues["handle"].put(data)
 
-    def _append(self, data: Data):
-        if "CLR" not in data.prefixes:
-            self._queues["handle"].put(data)
-
-    @error.handle(queue.Empty, logging=False)
+    @error.handle(queue.Empty)
     def _thread_handle(self):
-        data = self._queues["recv"].get()
-        self._handle(data_recv(data))
-        self._queues["recv"].task_done()
+        data = self._queues["recv"].get(False)
+        try:
+            self._handle(data_recv(data))
+        finally:
+            self._queues["recv"].task_done()
 
 class Client(NodeClient):
 
     def __init_subclass__(cls, **kwargs):
         pass
 
-    def __init__(self, addr: str, port: int, dispatch={}):
-        super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port, -1, dispatch)
+    def __init__(self, addr: str, port: int, dispatch=()):
+        super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port, dispatch)
 
     @error.handle((ConnectionError, OSError), error.CloseError, close=True)
+    @error.log
     def open(self):
-        self.c_socket.connect((self.addr, self.port))
-        self.id = 0
-        super().open()
+        if not self:
+            self.c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.c_socket.connect((self.addr, self.port))
+            super().open()
 
 class ServerClient(NodeClient):
 
     def __init_subclass__(cls, **kwargs):
         pass
 
-    def __init__(self, c_socket: socket.socket, addr: str, port: int, id: int, dispatchers={}):
-        super().__init__(c_socket, addr, port, id, dispatchers)
+    def __init__(self, c_socket: socket.socket, addr: str, port: int, dispatchers=()):
+        super().__init__(c_socket, addr, port, dispatchers)
         self.open()
+
+    def open(self):
+        super().open()
+        print("Connection:", self)
 
 class Server(Node):
 
-    def __init__(self, addr: str, port: int, limit=10, client: ServerClient=ServerClient, dispatchers={}):
-        super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port, -1)
-        del self._queues["send"], self._threads["send"]
+    def __init__(self, addr: str, port: int, limit=10, client: ServerClient=ServerClient, dispatchers=()):
+        super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port)
+        del self._queues["recv"], self._threads["recv"]
         self.limit = limit
         self.client = client
         self.dispatchers = dispatchers
+        self.connections = set()
+
+        self.client.close = _close_server_client(self.client.close, self)
 
     def open(self):
         self.c_socket.bind((self.addr, self.port))
-        self.id = 0
         self.c_socket.listen(self.limit)
         super().open()
 
-    def close(self):
+    def close(self, kill=True):
         super().close()
+        if kill:
+            for sc in list(self.connections):
+                sc.close()
 
-    def _thread_recv(self):
+    @error.handle((ConnectionError, OSError), error.CloseError, close=True)
+    def _thread_send(self):
         conn, addr = self.c_socket.accept()
-        self.client(conn, *addr, conn.fileno(), self.dispatchers)
+        self.connections.add(self.client(conn, *addr, self.dispatchers))

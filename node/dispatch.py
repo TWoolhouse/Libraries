@@ -44,7 +44,9 @@ class Dispatch:
         self.data = data
 
     def __init_subclass__(cls, output: bool=False, end: (bool, None)=True, node: Node=None):
-        cls.__init__ = super().__init__
+        cls.__name__ = cls.__name__.upper()
+        if super(cls, cls).__init__ != cls.__init__:
+            cls.__init__ = super(cls, cls).__init__
         cls.handle = handle(error.dispatch(cls.handle), output, end)
         if node is not None:
             node._dispatchers[cls.__name__] = cls
@@ -55,7 +57,7 @@ class Dispatch:
 class PASS(Dispatch):
 
     def handle(self):
-        raise ValueError("Error")
+        pass
 
 class CLOSE(Dispatch):
 
