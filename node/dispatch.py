@@ -1,5 +1,6 @@
-from node.data import Data
+from node.data import Data, Tag
 from node import error
+import time
 
 __all__ = ["Dispatch"]
 
@@ -10,17 +11,17 @@ def handle(func: callable, output, end):
         if end == True:
             def handle(self):
                 res = func(self)
-                self.node.queues["handle"].put(res)
+                self.node._queues["handle"].put(res)
                 return False
         elif end == False:
             def handle(self):
                 res = func(self)
-                self.node.queues["handle"].put(res)
+                self.node._queues["handle"].put(res)
                 return True
         else:
             def handle(self):
                 res = func(self)
-                self.node.queues["handle"].put(res[1])
+                self.node._queues["handle"].put(res[1])
                 return bool(res[0])
     else:
         if end == True:
@@ -54,6 +55,11 @@ class Dispatch:
     def handle(self):
         raise TypeError("Not a Valid Dispatcher")
 
+class DATA(Dispatch, output=True):
+
+    def handle(self):
+        return self.data
+
 class PASS(Dispatch):
 
     def handle(self):
@@ -77,5 +83,48 @@ class CALL(Dispatch):
 
 class RLY(Dispatch):
     pass
+
+class ENCRYPT(Dispatch):
+
+    def handle(self):
+        if "CLIENT" in self.data.tags:
+            self.client()
+        else:
+            self.server()
+
+    def client(self):
+        self.node.send(True, "ENCRYPT")
+        common = self.node.recv("ENCRYPT", Tag("COMMON"), wait=True)[0]
+        base, modulus = map(int, common.data.split("|"))
+        mixture = base ** self.node._encrypt["private"] % modulus
+        self.node.send(mixture, "DATA", "ENCRYPT", Tag("MIX"))
+        mix = self.node.recv("ENCRYPT", Tag("MIX"), wait=True)[0]
+        sk = int(mix.data) ** self.node._encrypt["private"] % modulus
+        self.node.send(True, "DATA", "ENCRYPT", Tag("WAIT"))
+        self.node.join("send")
+        self.node.recv("ENCRYPT", Tag("WAIT"), wait=True)
+        self.node._encrypt["secret"] = sk
+        self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+        while not self.node.recv("ENCRYPT", Tag("ENC"), wait=True, timeout=0.75):
+            self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+        self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+        self.node.send(True, "DATA", "ENCRYPT", Tag("END"))
+
+    def server(self):
+        base, modulus = self.node.server._encrypt["base"], self.node.server._encrypt["modulus"]
+        self.node.send("{}|{}".format(base, modulus), "DATA", "ENCRYPT", Tag("COMMON"))
+        mixture = base ** self.node._encrypt["private"] % modulus
+        self.node.send(mixture, "DATA", "ENCRYPT", Tag("MIX"))
+        mix = self.node.recv("ENCRYPT", Tag("MIX"), wait=True)[0]
+        sk = int(mix.data) ** self.node._encrypt["private"] % modulus
+        self.node.send(True, "DATA", "ENCRYPT", Tag("WAIT"))
+        self.node.join("send")
+        self.node.recv("ENCRYPT", Tag("WAIT"), wait=True)
+        self.node._encrypt["secret"] = sk
+        self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+        while not self.node.recv("ENCRYPT", Tag("ENC"), wait=True, timeout=0.75):
+            self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+        self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+        self.node.send(True, "DATA", "ENCRYPT", Tag("END"))
 
 dispatch = {k:v for k,v in globals().items() if type(v) is type and k.upper() == k and v is not Dispatch and issubclass(v, Dispatch)}

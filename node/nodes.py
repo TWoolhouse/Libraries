@@ -1,11 +1,14 @@
-from node.data import Data
+from node.data import Data, Tag
 from node import error
 from node import dispatch
-import crypt
-import hashes
 import queue
 import socket
 import threading
+import secrets
+import time
+import libs
+import crypt
+import hashes
 
 __all__ = ["Client", "ServerClient", "Server"]
 
@@ -32,7 +35,7 @@ class Thread:
 
 def data_send(data: Data) -> bytes:
     pre = "{}<#>{}<#>".format("|".join(data.prefixes), "|".join(data.tags)).encode("utf-8")
-    data = data.data if isinstance(data.data, bytes) else data.data.encode("utf-8")
+    data = data.data if isinstance(data.data, bytes) else str(data.data).encode("utf-8")
     return pre+data
 
 def data_recv(data: bytes) -> Data:
@@ -40,7 +43,7 @@ def data_recv(data: bytes) -> Data:
     pre = pre.decode("utf-8").split("|")
     tag = tag.decode("utf-8").split("|")
     data = data if b"BIN" in pre else data.decode("utf-8")
-    return Data(data, *pre, tags=tag)
+    return Data(data, *pre, *map(Tag, tag))
 
 def _close_server_client(func, server):
     def _close(self):
@@ -103,7 +106,11 @@ class Node:
 
     def _start(self):
         for thread in self._threads.values():
-            thread.start(self.event)
+            if isinstance(thread, list):
+                for t in thread:
+                    t.start(self.event)
+            else:
+                thread.start(self.event)
 
     @error.handle(queue.Empty)
     def _thread_send(self):
@@ -143,21 +150,25 @@ class NodeClient(Node):
 
     def __init_subclass__(cls, **kwargs):
         init_subclass = cls.__init_subclass__.__func__
-        def _init_subclass(sub_cls, dispatchers={}, **sub_kwargs):
-            sub_cls._dispatchers = {**super(cls, cls)._dispatchers, **sub_cls._dispatchers, **dispatchers}
+        def _init_subclass(sub_cls, dispatchers=(), **sub_kwargs):
+            sub_cls._dispatchers = {**super(cls, cls)._dispatchers, **sub_cls._dispatchers, **{d.__name__ : d for d in dispatchers}}
             init_subclass(sub_cls, **sub_kwargs)
         cls.__init_subclass__ = classmethod(_init_subclass)
 
     def __init__(self, c_socket: socket.socket, addr: str, port: int, dispatchers=()):
         super().__init__(c_socket, addr, port)
         self._queues["handle"] = queue.Queue()
-        self._threads["handle"] = Thread(self._thread_handle)
+        self._threads["handle"] = [Thread(self._thread_handle) for i in range(2)]
         self._outputs["data"] = []
+        self._encrypt = {
+            "private": secrets.randbits(16),
+            "secret": 1,
+        }
 
         self._dispatchers =  {**self._dispatchers, **{d.__name__: d for d in dispatchers}}
 
-    def send(self, data: (str, Data), *prefixes: str, tags: str=()):
-        data = Data(data.data, *prefixes, *data.prefixes, tags=(*tags, *data.tags)) if isinstance(data, Data) else Data(data, *prefixes, tags=tags)
+    def send(self, data: (str, Data), *prefixes: str):
+        data = Data(data.data, *prefixes, *data.prefixes) if isinstance(data, Data) else Data(data, *prefixes)
         self._queues["send"].put(data_send(data))
 
     @property
@@ -165,19 +176,37 @@ class NodeClient(Node):
         self._outputs["data"].extend(clear_queue(self._queues["handle"]))
         return self._outputs["data"]
 
-    def recv(self, *prefixes, tags: tuple=(), wait: int=False) -> [Data,]:
-        results = [data for data in self.output if all(prefix in data.prefixes for prefix in prefixes) and all(tag in data.tags for tag in tags)]
+    def recv(self, *prefixes, wait: int=False, timeout: int=False) -> [Data,]: # interval=0
+        require = Data(False, *prefixes)
+        start_time = time.time()
+        results = [data for data in self.output if all(prefix in data.prefixes for prefix in require.prefixes) and all(tag in data.tags for tag in require.tags)]
         for res in results:
             self._outputs["data"].remove(res)
-        while len(results) < wait:
-            results.extend((data for data in self.output if all(prefix in data.prefixes for prefix in prefixes) and all(tag in data.tags for tag in tags)))
+        while len(results) < wait and ((time.time() - start_time < timeout) if timeout else True):
+            results.extend((data for data in self.output if all(prefix in data.prefixes for prefix in require.prefixes) and all(tag in data.tags for tag in require.tags)))
+            if not self:
+                results.extend(self.recv(require.prefixes, wait=wait, timeout=1))
+                break
+            # time.sleep(interval)
+        try:
             for res in results:
                 self._outputs["data"].remove(res)
+        except ValueError:    pass
+        # if not results and not self:
+        #     raise error.CloseError(self)
         return results
+
+    def join(self, queue: ("send", "recv", "handle")="send", *queues):
+        qs = [queue, *queues]
+        queues = []
+        for q in qs:
+            queues.append(q) if q is not "all" else queues.extend(("send", "recv", "handle"))
+        for q in queues:
+            self._queues[q].join()
 
     @error.handle((ConnectionError, OSError), error.CloseError, close=True)
     def _send(self, data: bytes):
-        crypt.encrypt_bytes(data, b"encryption")
+        data = crypt.encrypt(data, self._encrypt["secret"])
         self.c_socket.send(data+b"<|>")
 
     @error.handle((ConnectionError, OSError), error.CloseError, close=True)
@@ -185,7 +214,7 @@ class NodeClient(Node):
         while b"<|>" not in raw:
             raw += self.c_socket.recv(BUFFER_SIZE)
         data, old = raw.split(b"<|>", 1)
-        crypt.decrypt_bytes(data, b"encryption")
+        data = crypt.decrypt(data, self._encrypt["secret"])
         return data, old
 
     @error.handle(error.DispatchError)
@@ -199,11 +228,17 @@ class NodeClient(Node):
                 continue
         self._queues["handle"].put(data)
 
+    @error.handle(error.EncryptionError)
+    @error.log
     @error.handle(queue.Empty)
     def _thread_handle(self):
         data = self._queues["recv"].get(False)
         try:
-            self._handle(data_recv(data))
+            try:
+                data = data_recv(data)
+            except ValueError as e:
+                raise error.EncryptionError(self, "Message was not decrypted!") from None
+            self._handle(data)
         finally:
             self._queues["recv"].task_done()
 
@@ -223,28 +258,43 @@ class Client(NodeClient):
             self.c_socket.connect((self.addr, self.port))
             super().open()
 
+            #--- Diffie-Hellman ---#
+            x = self.recv("ENCRYPT", Tag("END"), wait=True)[0]
+
 class ServerClient(NodeClient):
 
     def __init_subclass__(cls, **kwargs):
         pass
 
-    def __init__(self, c_socket: socket.socket, addr: str, port: int, dispatchers=()):
+    def __init__(self, c_socket: socket.socket, addr: str, port: int, server, dispatchers=()):
         super().__init__(c_socket, addr, port, dispatchers)
+        self.server = server
         self.open()
 
     def open(self):
         super().open()
-        print("Connection:", self)
+
+        #--- Diffie–Hellman ---#
+        if self.server._encrypt["base"]:
+            self.send(True, "ENCRYPT", Tag("CLIENT"))
+        else:
+            self.send(False, "DATA", "ENCRYPT")
+        x = self.recv("ENCRYPT", Tag("END"), wait=True)[0]
 
 class Server(Node):
 
-    def __init__(self, addr: str, port: int, limit=10, client: ServerClient=ServerClient, dispatchers=()):
+    def __init__(self, addr: str, port: int, limit=10, client: ServerClient=ServerClient, dispatchers=(), encrypt=False, password=False):
         super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port)
         del self._queues["recv"], self._threads["recv"]
         self.limit = limit
         self.client = client
         self.dispatchers = dispatchers
         self.connections = set()
+        self._encrypt = {
+            "modulus": secrets.randbits(32),
+            "base": secrets.choice(range(2, 4)),
+            "password": 123,
+        }
 
         self.client.close = _close_server_client(self.client.close, self)
 
@@ -262,4 +312,4 @@ class Server(Node):
     @error.handle((ConnectionError, OSError), error.CloseError, close=True)
     def _thread_send(self):
         conn, addr = self.c_socket.accept()
-        self.connections.add(self.client(conn, *addr, self.dispatchers))
+        self.connections.add(self.client(conn, *addr, self, self.dispatchers))

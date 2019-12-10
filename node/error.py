@@ -1,47 +1,44 @@
 __all__ = ["CloseError", "RemoteError", "DispatchError"]
 
-class NodeBaseError(Exception):
+class MetaNodeError(type):
 
-    @classmethod
-    def _sub_init(cls, func):
-        def sub_init(self, *args, **kwargs):
-            cls.__init__(self, args[0])
-            func(self, *args, **kwargs)
-        return sub_init
+    node = "NODE"
 
-    @classmethod
-    def _sub_str(cls, func):
-        def sub_str(self):
-            return cls.__str__(self)+" -> "+func(self)
-        return sub_str
+    def __new__(cls, name, bases, dct):
+        if "__str__" in dct:
+            def new_str(func):
+                def _str_(self):
+                    return "{}: <{}".format(self.__class__.__name__, self.node) + " -> " + func(self) + ">"
+                return _str_
+            dct["__str__"] = new_str(dct["__str__"])
+        return super().__new__(cls, name, bases, dct)
 
-    def __init__(self, node):
+    def __call__(cls, node, *args, **kwargs):
+        self = super().__call__(*args, **kwargs)
         self.node = node
+        return self
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        cls.__init__ = NodeBaseError._sub_init(cls.__init__)
-        cls.__str__ = NodeBaseError._sub_str(cls.__str__)
+class NodeBaseError(Exception, metaclass=MetaNodeError):
+    pass
 
-    def __str__(self):
-        return "{}: <{}>".format(self.__class__.__name__, self.node)
-
-class CloseError(NodeBaseError):
-    def __init__(self, node, msg="Connection Closed"):
+class NodeError(NodeBaseError):
+    def __init__(self, msg):
         self.msg = msg
 
-    def __str__(self):
-        return "{}".format(self.msg)
+    def __str__(self) -> str:
+        return self.msg.__str__()
 
-class RemoteError(NodeBaseError):
-    def __init__(self, node, msg):
-        self.msg = msg
+class CloseError(NodeError):
+    def __init__(self, msg="Connection Closed"):
+        super().__init__(msg)
 
-    def __str__(self):
-        return "{}".format(self.msg)
+class RemoteError(NodeError):
+    pass
+class EncryptionError(NodeError):
+    pass
 
 class DispatchError(NodeBaseError):
-    def __init__(self, node, cls, msg="Failed to Handle Request"):
+    def __init__(self, cls, msg="Failed to Handle Request"):
         self.cls = cls
         self.msg = msg
 
@@ -85,8 +82,9 @@ def con_active(func):
 def dispatch(func):
     def dispatcher(dispatcher):
         try:
-            func(dispatcher)
+            return func(dispatcher)
         except Exception as e:
-            msg = "'{}': {}".format(e.__class__.__name__, e)
+            msg = "{}".format("" if isinstance(e, NodeBaseError) else e.__class__.__name__) + "{}".format(e)
+            # msg = "'{}': {}".format(e.__class__.__name__, e)
             raise DispatchError(dispatcher.node, dispatcher.__class__, msg).with_traceback(e.__traceback__) from None
     return dispatcher
