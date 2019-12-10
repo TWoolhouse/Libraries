@@ -19,7 +19,9 @@ class MetaNodeError(type):
         return self
 
 class NodeBaseError(Exception, metaclass=MetaNodeError):
-    pass
+
+    def __repr__(self) -> str:
+        return self.__str__()
 
 class NodeError(NodeBaseError):
     def __init__(self, msg):

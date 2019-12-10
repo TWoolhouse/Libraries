@@ -85,7 +85,8 @@ class Node:
         if not self.event.is_set():
             self.event = threading.Event()
             self.event.set()
-            clear_queue(self._queues["send"])
+            for queue in self._queues.values():
+                clear_queue(queue)
             self._start()
 
     def close(self):
@@ -170,6 +171,7 @@ class NodeClient(Node):
     def send(self, data: (str, Data), *prefixes: str):
         data = Data(data.data, *prefixes, *data.prefixes) if isinstance(data, Data) else Data(data, *prefixes)
         self._queues["send"].put(data_send(data))
+        return self
 
     @property
     def output(self):
@@ -185,15 +187,15 @@ class NodeClient(Node):
         while len(results) < wait and ((time.time() - start_time < timeout) if timeout else True):
             results.extend((data for data in self.output if all(prefix in data.prefixes for prefix in require.prefixes) and all(tag in data.tags for tag in require.tags)))
             if not self:
-                results.extend(self.recv(require.prefixes, wait=wait, timeout=1))
+                results.extend(self.recv(require.prefixes))
                 break
             # time.sleep(interval)
         try:
             for res in results:
                 self._outputs["data"].remove(res)
         except ValueError:    pass
-        # if not results and not self:
-        #     raise error.CloseError(self)
+        if not results and wait:
+            raise error.CloseError(self)
         return results
 
     def join(self, queue: ("send", "recv", "handle")="send", *queues):
@@ -247,8 +249,9 @@ class Client(NodeClient):
     def __init_subclass__(cls, **kwargs):
         pass
 
-    def __init__(self, addr: str, port: int, dispatch=()):
+    def __init__(self, addr: str, port: int, dispatch=(), password=None):
         super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port, dispatch)
+        self._encrypt["password"] = str(password)
 
     @error.handle((ConnectionError, OSError), error.CloseError, close=True)
     @error.log
@@ -259,7 +262,17 @@ class Client(NodeClient):
             super().open()
 
             #--- Diffie-Hellman ---#
-            x = self.recv("ENCRYPT", Tag("END"), wait=True)[0]
+            if self.recv("ENCRYPT", Tag("END"), wait=True)[0].data != "True":
+                raise error.CloseError(self, "Encryption Failure")
+
+            #--- Password ---#
+            self.send(self._encrypt["password"], "DATA", "PASSWORD")
+            try:
+                if self.recv("PASSWORD", wait=True)[0].data != "True":
+                    raise error.CloseError(self)
+            except error.CloseError:
+                raise error.CloseError(self, "Password Incorrect") from None
+
 
 class ServerClient(NodeClient):
 
@@ -269,21 +282,35 @@ class ServerClient(NodeClient):
     def __init__(self, c_socket: socket.socket, addr: str, port: int, server, dispatchers=()):
         super().__init__(c_socket, addr, port, dispatchers)
         self.server = server
-        self.open()
 
+    def close(self):
+        super().close()
+        # self.server.connections.remove(self)
+
+    @error.handle(error.CloseError, close=True)
+    @error.log
     def open(self):
         super().open()
+        print("Connection:", self)
 
         #--- Diffie–Hellman ---#
         if self.server._encrypt["base"]:
             self.send(True, "ENCRYPT", Tag("CLIENT"))
         else:
-            self.send(False, "DATA", "ENCRYPT")
-        x = self.recv("ENCRYPT", Tag("END"), wait=True)[0]
+            self.send(True, "DATA", "ENCRYPT", Tag("END"))
+        if self.recv("ENCRYPT", Tag("END"), wait=True, timeout=5)[0].data != "True":
+            raise error.CloseError(self, "Encryption Failure")
+
+        #--- Password ---#
+        if self.recv("PASSWORD", wait=True, timeout=5)[0].data == self.server._encrypt["password"]:
+            self.send(True, "DATA", "PASSWORD")
+        else:
+            self.send(False, "DATA", "PASSWORD").join()
+            raise error.CloseError(self, "Password Incorrect")
 
 class Server(Node):
 
-    def __init__(self, addr: str, port: int, limit=10, client: ServerClient=ServerClient, dispatchers=(), encrypt=False, password=False):
+    def __init__(self, addr: str, port: int, limit=10, client: ServerClient=ServerClient, dispatchers=(), encrypt=False, password=None):
         super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port)
         del self._queues["recv"], self._threads["recv"]
         self.limit = limit
@@ -293,7 +320,7 @@ class Server(Node):
         self._encrypt = {
             "modulus": secrets.randbits(32),
             "base": secrets.choice(range(2, 4)),
-            "password": 123,
+            "password": str(password),
         }
 
         self.client.close = _close_server_client(self.client.close, self)
@@ -312,4 +339,6 @@ class Server(Node):
     @error.handle((ConnectionError, OSError), error.CloseError, close=True)
     def _thread_send(self):
         conn, addr = self.c_socket.accept()
-        self.connections.add(self.client(conn, *addr, self, self.dispatchers))
+        client = self.client(conn, *addr, self, self.dispatchers)
+        self.connections.add(client)
+        client.open()

@@ -93,38 +93,59 @@ class ENCRYPT(Dispatch):
             self.server()
 
     def client(self):
+        # Client tells server it is ready
         self.node.send(True, "ENCRYPT")
+        # Client receives Common keys
         common = self.node.recv("ENCRYPT", Tag("COMMON"), wait=True)[0]
         base, modulus = map(int, common.data.split("|"))
+        # Computes its key own using the private key
         mixture = base ** self.node._encrypt["private"] % modulus
+        # Sends Server new key
         self.node.send(mixture, "DATA", "ENCRYPT", Tag("MIX"))
+        # Recieves Server's new key
         mix = self.node.recv("ENCRYPT", Tag("MIX"), wait=True)[0]
+        # Produces the Secret Key by mixing with own Private
         sk = int(mix.data) ** self.node._encrypt["private"] % modulus
+        # Tell Server Secret has been computed
         self.node.send(True, "DATA", "ENCRYPT", Tag("WAIT"))
         self.node.join("send")
         self.node.recv("ENCRYPT", Tag("WAIT"), wait=True)
+        # Wait until Server is also ready
+        # Update Encryption Key
         self.node._encrypt["secret"] = sk
+        # Send Server Heartbeat until Client receives confirmation they are both connected
         self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
         while not self.node.recv("ENCRYPT", Tag("ENC"), wait=True, timeout=0.75):
             self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
         self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+        # Send End to release lock
         self.node.send(True, "DATA", "ENCRYPT", Tag("END"))
 
     def server(self):
         base, modulus = self.node.server._encrypt["base"], self.node.server._encrypt["modulus"]
+        # Sends Client Common keys
         self.node.send("{}|{}".format(base, modulus), "DATA", "ENCRYPT", Tag("COMMON"))
+        # Computes its key own using the private key
         mixture = base ** self.node._encrypt["private"] % modulus
+        # Sends Client new key
         self.node.send(mixture, "DATA", "ENCRYPT", Tag("MIX"))
+        # Recieves Client's new key
         mix = self.node.recv("ENCRYPT", Tag("MIX"), wait=True)[0]
+        # Produces the Secret Key by mixing with own Private
         sk = int(mix.data) ** self.node._encrypt["private"] % modulus
+        # Tell Client Secret has been computed
         self.node.send(True, "DATA", "ENCRYPT", Tag("WAIT"))
         self.node.join("send")
         self.node.recv("ENCRYPT", Tag("WAIT"), wait=True)
+        # Wait until Client is also ready
+        # Update Encryption Key
         self.node._encrypt["secret"] = sk
+        # Send Client Heartbeat until Server receives confirmation they are both connected
         self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
         while not self.node.recv("ENCRYPT", Tag("ENC"), wait=True, timeout=0.75):
             self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
         self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+        # Send End to release lock
         self.node.send(True, "DATA", "ENCRYPT", Tag("END"))
 
 dispatch = {k:v for k,v in globals().items() if type(v) is type and k.upper() == k and v is not Dispatch and issubclass(v, Dispatch)}
