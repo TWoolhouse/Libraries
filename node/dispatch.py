@@ -11,17 +11,20 @@ def handle(func: callable, output, end):
         if end == True:
             def handle(self):
                 res = func(self)
-                self.node._queues["handle"].put(res)
+                self.data = res
+                self.node._queues["handle"].put(self)
                 return False
         elif end == False:
             def handle(self):
                 res = func(self)
-                self.node._queues["handle"].put(res)
+                self.data = res
+                self.node._queues["handle"].put(self)
                 return True
         else:
             def handle(self):
                 res = func(self)
-                self.node._queues["handle"].put(res[1])
+                self.data = res[1]
+                self.node._queues["handle"].put(self)
                 return bool(res[0])
     else:
         if end == True:

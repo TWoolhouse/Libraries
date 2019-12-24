@@ -202,7 +202,7 @@ class NodeClient(Node):
         qs = [queue, *queues]
         queues = []
         for q in qs:
-            queues.append(q) if q is not "all" else queues.extend(("send", "recv", "handle"))
+            queues.append(q) if q != "all" else queues.extend(("send", "recv", "handle"))
         for q in queues:
             self._queues[q].join()
 
