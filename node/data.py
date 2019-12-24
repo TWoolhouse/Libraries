@@ -1,4 +1,4 @@
-__all__ = ["Data"]
+__all__ = ["Data", "Tag"]
 
 class Tag:
 

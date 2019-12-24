@@ -11,20 +11,20 @@ def handle(func: callable, output, end):
         if end == True:
             def handle(self):
                 res = func(self)
-                self.data = res
-                self.node._queues["handle"].put(self)
+                self.data.data = res
+                self.node._queues["handle"].put(self.data)
                 return False
         elif end == False:
             def handle(self):
                 res = func(self)
-                self.data = res
-                self.node._queues["handle"].put(self)
+                self.data.data = res
+                self.node._queues["handle"].put(self.data)
                 return True
         else:
             def handle(self):
                 res = func(self)
-                self.data = res[1]
-                self.node._queues["handle"].put(self)
+                self.data.data = res[1]
+                self.node._queues["handle"].put(self.data)
                 return bool(res[0])
     else:
         if end == True:
@@ -61,7 +61,7 @@ class Dispatch:
 class DATA(Dispatch, output=True):
 
     def handle(self):
-        return self.data
+        return self.data.data
 
 class PASS(Dispatch):
 

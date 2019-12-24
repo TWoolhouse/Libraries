@@ -159,7 +159,7 @@ class NodeClient(Node):
     def __init__(self, c_socket: socket.socket, addr: str, port: int, dispatchers=()):
         super().__init__(c_socket, addr, port)
         self._queues["handle"] = queue.Queue()
-        self._threads["handle"] = [Thread(self._thread_handle) for i in range(2)]
+        self._threads["handle"] = [Thread(self._thread_handle) for i in range(3)]
         self._outputs["data"] = []
         self._encrypt = {
             "private": secrets.randbits(16),
@@ -183,17 +183,19 @@ class NodeClient(Node):
         start_time = time.time()
         results = [data for data in self.output if all(prefix in data.prefixes for prefix in require.prefixes) and all(tag in data.tags for tag in require.tags)]
         for res in results:
-            self._outputs["data"].remove(res)
+            try:
+                self._outputs["data"].remove(res)
+            except ValueError:  pass
         while len(results) < wait and ((time.time() - start_time < timeout) if timeout else True):
             results.extend((data for data in self.output if all(prefix in data.prefixes for prefix in require.prefixes) and all(tag in data.tags for tag in require.tags)))
+            for res in results:
+                try:
+                    self._outputs["data"].remove(res)
+                except ValueError:  pass
             if not self:
                 results.extend(self.recv(require.prefixes))
                 break
             # time.sleep(interval)
-        try:
-            for res in results:
-                self._outputs["data"].remove(res)
-        except ValueError:    pass
         if not results and wait:
             raise error.CloseError(self)
         return results
