@@ -16,14 +16,14 @@ def record_time(output=None):
                 start = time.time()
                 res = func(*args, **kwargs)
                 end = time.time()
-                print("Time Taken: {:.3f}s".format((end-start)))
+                print("Time Taken: {:.9f}s".format((end-start)))
                 return res
         elif output == True:
             def record_time(*args, **kwargs):
                 start = time.time()
                 res = func(*args, **kwargs)
                 end = time.time()
-                print("Time Taken: {:.3f}s".format((end-start)))
+                print("Time Taken: {:.9f}s".format((end-start)))
                 return end-start
         else:
             def record_time(*args, **kwargs):

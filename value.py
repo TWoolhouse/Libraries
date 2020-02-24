@@ -13,7 +13,7 @@ class Value(int):
         Param: value, int
         """
         super().__init__(*args, **kwargs)
-    
+
     def __repr__(self) -> str:
         return super().__repr__()
 

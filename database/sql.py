@@ -1,5 +1,5 @@
-from _database.enums import Type, OP
-from _database.logic import Table, Column, Condition
+from database.enums import Type, OP
+from database.logic import Table, Column, Condition
 import sqlite3
 import enum
 

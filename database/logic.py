@@ -1,6 +1,6 @@
 __all__ = ["Table", "Column"]
 
-from _database.enums import Type, OP
+from database.enums import Type, OP
 
 def name_column(name: str) -> str:
     return name.lower().strip().replace(" ", "_")

@@ -64,6 +64,10 @@ class Page(tk.Frame):
     def add(self, wiget, name="_temp", **options):
         """tk.Wiget, name in wiget dict, grid options"""
         self.wigets[name] = wiget
+        if "sticky" not in options:
+            options["sticky"] = "nsew"
+        elif options["sticky"] is None:
+            del options["sticky"]
         self.wigets[name].grid(options)
 
     def edit(self, wiget, key, value):

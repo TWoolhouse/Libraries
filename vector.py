@@ -21,6 +21,9 @@ class Vector(object):
     def __hash__(self):
         return self.values.__hash__()
 
+    def __abs__(self):
+        return self.__class__(*(abs(i) for i in self))
+
     def int(self):
         return self.__class__(*(int(i) for i in self))
 
@@ -44,12 +47,12 @@ class Vector(object):
     def __add__(self, other): #can add
         if isinstance(other, self.__class__): #only allows other Vectors
             return self.__class__(*(a + b for a, b in zip(self, other)))
-        else:   raise TypeError(self.opp_err("+", other))
+        else:   raise TypeError(self._opp_err("+", other))
 
     def __sub__(self, other): #can subtract
         if isinstance(other, self.__class__): #only allows other Vectors
             return self.__class__(*(a - b for a, b in zip(self, other)))
-        else:   raise TypeError(self.opp_err("-", other))
+        else:   raise TypeError(self._opp_err("-", other))
 
     def __mul__(self, other): #can multiply
         if isinstance(other, (int, float)): #scalar multiplication
@@ -58,7 +61,7 @@ class Vector(object):
             return self._dot_mul(other)
         elif isinstance(other, list) or (type(other).__name__ == "Matrix"):
             return self._matrix_mul(other)
-        else:   raise TypeError(self.opp_err("*", other))
+        else:   raise TypeError(self._opp_err("*", other))
 
     def __rmul__(self, other): #multiplication on the righthandside
         return self.__mul__(other)
@@ -66,17 +69,17 @@ class Vector(object):
     def __truediv__(self, other): #division with /
         if isinstance(other, (int, float)): #only with a scalar
             return self.__class__(*(a / other for a in self))
-        else:   raise TypeError(self.opp_err("/", other))
+        else:   raise TypeError(self._opp_err("/", other))
 
     def __floordiv__(self, other): #division with //
         if isinstance(other, (int, float)): #only with a scalar
             return self.__class__(*(a // other for a in self))
-        else:   raise TypeError(self.opp_err("//", other))
+        else:   raise TypeError(self._opp_err("//", other))
 
     def __mod__(self, other):
         if isinstance(other, (int, float)): #only with a scalar
             return self.__class__(*(a % other for a in self))
-        else:   raise TypeError(self.opp_err("%", other))
+        else:   raise TypeError(self._opp_err("%", other))
 
     def _matrix_mul(self, other): #matrix multiplication
         if all(len(row) == len(self) for row in other) and (len(other) == len(self)): #has to have the same dimensions
@@ -133,6 +136,17 @@ class Vector(object):
             return self.__class__(*( ((self[i] - s1[i]) / (e1[i] - s1[i])) * (e2[i] - s2[i]) + s2[i] for i in range(len(self)) ))
         raise TypeError("Args must be Vectors of same length as self")
 
-    def opp_err(self, opp, b):
+    def within(self, *contraints: tuple, include: bool=False) -> bool:
+        """Checks if all values in Vector are within a contraint that corresponds to its index"""
+        if include:
+            return all((contraint[0] <= value and value <= contraint[1] for value, contraint in zip(self, contraints)))
+        return all((contraint[0] < value and value < contraint[1] for value, contraint in zip(self, contraints)))
+
+    def clamp(self, lower=None, upper=None):
+        return self.__class__(*(
+            (u if v > u else (l if v < l else v)) for v, l, u in zip(self, lower if lower else self, upper if upper else self)
+        ))
+
+    def _opp_err(self, opp, b):
         return "unsupported operand type(s) for {}: '{}' and '{}'".format(\
         opp, type(self).__name__, type(b).__name__)
