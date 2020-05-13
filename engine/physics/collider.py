@@ -1,51 +1,66 @@
-from vector import Vector
 import enum
+from vector import Vector
+from engine.ecs.components.collider import Collider
 
-__all__ = ["Point", "Rectangle", "Circle"]
+__all__ = ["detect", "Point", "Plane", "Rectangle", "Circle"]
 
-def rside(func):
-    def _rside(self, transform_s, other, transform_o):
-        return func(other, transform_o, self, transform_s)
+@enum.unique
+class Shape(enum.Enum):
+    Point = 1
+    Plane = 2
+    Rectangle = 3
+    Circle = 4
+
+Point = Shape.Point
+Plane = Shape.Plane
+Rectangle = Shape.Rectangle
+Circle = Shape.Circle
+
+def detect(c1: Collider, c2: Collider) -> bool:
+    return _d_detect_funcs[c1.shape][c2.shape](c1, c2)
+
+def rside(func) -> callable:
+    def _rside(c1: Collider, c2: Collider) -> bool:
+        return func(c2, c1)
     return rside
 
-class Collider:
-    _funcs = {}
+def _d_default(c1: Collider, c2: Collider) -> bool:
+    return c1.transform == c2.transform
 
-    def __init__(self, centre: Vector):
-        self.pos = centre
+def _d_point_point(c1: Collider, c2: Collider) -> bool:
+    return c1.transform.position_global == c2.transform.position_global
 
-    def detect(self, transform_s, other, transform_o) -> bool:
-        return self._funcs[type(other)](self, transform_s, other, transform_o)
+def _d_point_rectangle(c1: Collider, c2: Collider) -> bool:
+    rect, r_half = c2.transform.position_global, c2.transform.scale_global / 2
+    p = c1.transform.position_global
+    bl, tr = rect - r_half, rect + r_half,
+    return (p[0] > bl[0]) and (p[1] > bl[1]) and (p[0] < tr[0]) and (p[1] < tr[1])
 
-class Rectangle(Collider):
+def _d_rectangle_rectangle(c1: Collider, c2: Collider) -> bool:
+    r1, r2 = c1.transform.position_global, c2.transform.position_global
+    r1h, r2h = c1.transform.scale_global / 2, c2.transform.scale_global / 2
+    return (r1[0] - r1h[0]) < (r2[0] + r2h[0]) and (r1[0] + r1h[0]) > (r2[0] - r2h[0]) and (r1[1] - r1h[1]) < (r2[1] + r2h[1]) and (r1[1] + r1h[1]) > (r2[1] - r2h[1])
 
-    def __init__(self, centre: Vector, width: float, height: float):
-        super().__init__(centre)
-        self.width, self.height = width, height
-        self.width2, self.height2 = width / 2, height / 2
-
-    def _rectangle(self, tfs, other, tfo):
-        pass
-
-for k,v in {
-        Rectangle: Rectangle._rectangle,
-    }.items():
-    Rectangle._funcs[k] = v
-
-class Point(Collider):
-
-    def __init__(self, centre: Vector):
-        super().__init__(centre)
-
-    def _rectangle(self, tfs, other, tfo) -> bool:
-        width, height = Vector(other.width2, other.height2).map(tfo.scale)
-        return ((tfs.position_global + self.pos) - (tfo.position_global + other.pos)).within((-width, width), (-height, height))
-
-for k,v in {
-        Rectangle: Point._rectangle,
-    }.items():
-    Point._funcs[k] = v
-for k,v in {
-    Point: rside(Point._rectangle)
-    }.items():
-    Rectangle._funcs[k] = v
+_d_detect_funcs = {
+    Shape.Point: {
+        Shape.Point: _d_point_point,
+        Shape.Plane: _d_default,
+        Shape.Rectangle: _d_point_rectangle,
+        Shape.Circle: _d_default,
+    }, Shape.Plane: {
+        Shape.Point: _d_default,
+        Shape.Plane: _d_default,
+        Shape.Rectangle: _d_default,
+        Shape.Circle: _d_default,
+    }, Shape.Rectangle: {
+        Shape.Point: rside(_d_point_rectangle),
+        Shape.Plane: _d_default,
+        Shape.Rectangle: _d_rectangle_rectangle,
+        Shape.Circle: _d_default,
+    }, Shape.Circle: {
+        Shape.Point: _d_default,
+        Shape.Plane: _d_default,
+        Shape.Rectangle: _d_default,
+        Shape.Circle: _d_default,
+    },
+}

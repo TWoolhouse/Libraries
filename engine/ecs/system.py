@@ -1,14 +1,16 @@
-from engine.ecs.world import World
+from engine.ecs.component import Component
 
 class System:
 
     def __init__(self):
         pass
-    def update(self):
+
+    def __call__(self, application):
+        self.__app = application
+        self.update(application)
+
+    def update(self, application):
         pass
-    def components(self, type, *types):
-        if types:
-            for component in World.active().iter_component(type):
-                yield (component, *(component.Get(t) for t in types))
-        else:
-            yield from World.active().iter_component(type)
+
+    def components(self, type: Component, *types: Component) -> [Component,]:
+        return self.__app.world.components(type, *types)

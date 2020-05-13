@@ -12,14 +12,14 @@ class _Event(type):
         return super().__new__(cls, name, bases, dct)
 
 class Event(metaclass=_Event):
-    
+
     def __init__(self):
         self.handled = False
 
     def __repr__(self):
         return ""
 
-    def dispatch(self, event, func):
+    def dispatch(self, event, func=False):
         if isinstance(func, bool):
             if isinstance(self, event):
                 self.handled = func

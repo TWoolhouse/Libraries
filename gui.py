@@ -23,9 +23,9 @@ class Window(tk.Tk):
         """Takes a name and raises the Page to the front and calls Page.show()"""
         try:
             self.active = self.pages[page]
-            self.pages[page]._show()
         except KeyError as e:
             raise KeyError("'{}' is not a page in this Window".format(page))
+        self.pages[page]._show()
 
     def add_page(self, page):
         """Takes a Page and adds it to the Windows stack of pages"""
@@ -48,7 +48,7 @@ class Page(tk.Frame):
         self.parent = parent
         super().__init__(self.parent)
         self.parent.add_page(self)
-        self.wigets = {}
+        self.widgets = {}
         self.grid_rowconfigure(0, weight=1)
         self.grid_rowconfigure(9999, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -56,23 +56,26 @@ class Page(tk.Frame):
         self.setup(*args)
 
     def __getitem__(self, key):
-        return self.wigets[key]
+        return self.widgets[key]
 
     def __setitem__(self, key, value):
-        self.wigets[key] = value
+        self.widgets[key] = value
 
-    def add(self, wiget, name="_temp", **options):
-        """tk.Wiget, name in wiget dict, grid options"""
-        self.wigets[name] = wiget
+    def add(self, widget, name="_temp", **options):
+        """tk.Wiget, name in widget dict, grid options"""
+        self.widgets[name] = widget
         if "sticky" not in options:
             options["sticky"] = "nsew"
         elif options["sticky"] is None:
             del options["sticky"]
-        self.wigets[name].grid(options)
+        self.widgets[name].grid(options)
 
-    def edit(self, wiget, key, value):
-        """wiget name, value to edit, value"""
-        self.wigets[wiget][key] = value
+    def remove(self, widget):
+        self.widgets[widget].grid_remove()
+
+    def edit(self, widget, key, value):
+        """widget name, value to edit, value"""
+        self.widgets[widget][key] = value
 
     def _show(self):
         """Called when raised to the front of the stack"""

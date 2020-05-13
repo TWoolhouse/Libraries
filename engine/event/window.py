@@ -12,7 +12,7 @@ class WindowResize(Window):
 
     def __init__(self, width, height):
         self.width, self.height = width, height
-    
+
     def __repr__(self) -> str:
         return "({}, {})".format(self.width, self.height)
 

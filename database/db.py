@@ -3,10 +3,14 @@ from database.logic import Table, Column, Condition
 import database.sql
 import database.logic
 
+from interface import Interface
+import asyncio
 import threading
 import queue
 
-__all__ = ["Database"]
+__all__ = ["Database", "ThreadDatabase", "AsyncDatabase", "Serialize"]
+
+Serialize = database.sql.Serialize
 
 class Database:
     """A interface to the database file"""
@@ -15,7 +19,8 @@ class Database:
         self.filepath = filepath
         self.sql = database.sql.Sql(self.filepath+".db")
         if new:
-            self.new()
+            with self:
+                self.new()
 
     def new(self):
         """Create new/overwrite DB file"""
@@ -84,37 +89,44 @@ class ThreadDatabase(Database):
     def __init__(self, filepath: str, new: bool=False):
         super().__init__(filepath, new=False)
         self._event = threading.Event()
+        self._state = threading.Event()
         self._thread = threading.Thread(target=self.__loop_database_calls, args=(self._event,))
         self._func_calls = queue.Queue()
         self._data_response = {}
 
+        self._state.set()
         if new:
-            super().open()
-            super().new()
-            super().close()
+            self.new()
 
     def open(self):
         """Open Database Connection"""
         if not self._event.is_set():
             self._event.set()
-            self._thread = threading.Thread(target=self.__loop_database_calls, args=(self._event,))
+            self._state.wait()
+            self._thread = threading.Thread(target=self.__loop_database_calls, args=(self._event, self._state))
             self._thread.start()
+            while self._state.is_set():
+                pass
 
     def close(self):
         """Close Database File"""
         self._event.clear()
 
-    def __loop_database_calls(self, db_event):
+    def __loop_database_calls(self, db_event: threading.Event, cl_event: threading.Event):
         try:
             super().open()
             try:
                 self.load()
             except TypeError:    pass
+            cl_event.clear()
             while db_event.is_set():
                 try:
                     event, func, args, kwargs = self._func_calls.get_nowait()
                 except queue.Empty:    continue
-                self._data_response[event] = func(*args, **kwargs)
+                try:
+                    self._data_response[event] = func(*args, **kwargs)
+                except Exception as e:
+                    self._data_response[event] = e
                 event.set()
                 self._func_calls.task_done()
                 for e in list(self._data_response.keys()):
@@ -129,6 +141,13 @@ class ThreadDatabase(Database):
             except queue.Empty: pass
         finally:
             super().close()
+            cl_event.set()
+            try:
+                while True:
+                    event, f, a, k = self._func_calls.get_nowait()
+                    self._data_response[event] = None
+                    event.set()
+            except queue.Empty: pass
 
     def __func_call(self, func, *args, **kwargs):
         event = queue.threading.Event()
@@ -142,7 +161,9 @@ class ThreadDatabase(Database):
 
     def new(self):
         """Create new/overwrite DB file"""
-        return self.__func_call(super().new)
+        super().open()
+        super().new()
+        super().close()
 
     def exec(self, stmt: str, params: tuple=None):
         """Execute Raw SQL Statements"""
@@ -166,3 +187,102 @@ class ThreadDatabase(Database):
     def selectID(self, table: Table, *conditions: Condition, all=False):
         """Select ID from Table Where Conditions are Met"""
         return self.__func_call(super().selectID, table, *conditions, all=all)
+
+class AsyncDatabase(Database):
+
+    def __init__(self, filepath: str, new: bool=False):
+        super().__init__(filepath)
+        self.__event = asyncio.Event()
+        self.__event.set()
+        self.__queue = asyncio.Queue()
+        self.__response = {}
+        self.__new = new
+
+    def __await__(self):
+        return self.__queue.join().__await__()
+
+    async def __func_call(self, func, *args, **kwargs):
+        event = asyncio.Event()
+        self.__queue.put_nowait((event, func, args, kwargs))
+        await event.wait()
+        res = self.__response[event]
+        if isinstance(res, Exception):
+            raise res
+        event.clear()
+        return res
+
+    @Interface.submit
+    async def serve(self):
+        func = await self.__queue.get()
+        if func is None:
+            self.__shutdown_requests()
+            return True
+
+        event, func, args, kwargs = func
+        try:
+            self.__response[event] = func(*args, **kwargs)
+        except Exception as err:
+            self.__response[event] = err
+        event.set()
+        self.__queue.task_done()
+
+        for event in tuple(self.__response.keys()):
+            if not event.is_set():
+                del self.__response[event]
+
+    @serve.start
+    async def __open(self):
+        super().open()
+        if self.__new:
+            self.__new = False
+            await self.new()
+
+    @serve.final
+    async def __close(self):
+        self.__queue.put_nowait(None)
+        self.__shutdown_requests()
+        super().close()
+
+    def __shutdown_requests(self):
+        try:
+            while True:
+                func = self.__queue.get_nowait()
+                if func is None:
+                    continue
+                event, func, args, kwargs = func
+                self.__response[event] = RuntimeError()
+        except asyncio.QueueEmpty:    pass
+
+    def open(self):
+        raise TypeError(f"Can not Open '{self.__class__.__name__}' directly")
+
+    async def close(self):
+        self.serve.cancel()
+        await self.serve
+        self.__event.set()
+
+    async def new(self):
+        return await self.__func_call(super().new)
+
+    async def exec(self, stmt: str, params: tuple=None):
+        """Execute Raw SQL Statements"""
+        return await self.__func_call(super().exec, stmt, params=params)
+
+    async def table(self, name: str, *columns: Column) -> Table:
+        """Create a New Table"""
+        return await self.__func_call(super().table, name, *columns)
+
+    async def insert(self, table: Table, *values, columns: dict={}, id=False):
+        """Insert a Row into Table
+
+        columns: dict[Column, str, int] = value
+        """
+        return await self.__func_call(super().insert, table, *values, columns=columns, id=id)
+
+    async def select(self, table: Table, *conditions: Condition, columns:tuple=("*",), all=True):
+        """Select Columns from Table Where Conditions are Met"""
+        return await self.__func_call(super().select, table, *conditions, columns=columns, all=all)
+
+    async def selectID(self, table: Table, *conditions: Condition, all=False):
+        """Select ID from Table Where Conditions are Met"""
+        return await self.__func_call(super().selectID, table, *conditions, all=all)

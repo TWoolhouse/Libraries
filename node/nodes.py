@@ -27,7 +27,7 @@ class Thread:
         self.thread.start()
     def threading(self, func: callable) -> callable:
         @error.handle(error.CloseError, True, close=True)
-        @error.log
+        @error.log()
         def threading(node, event):
             while event.is_set():
                 func()
@@ -42,7 +42,7 @@ def data_recv(data: bytes) -> Data:
     pre, tag, data = data.split(b"<#>", 2)
     pre = pre.decode("utf-8").split("|")
     tag = tag.decode("utf-8").split("|")
-    data = data if b"BIN" in pre else data.decode("utf-8")
+    data = data if "BIN" in pre else data.decode("utf-8")
     return Data(data, *pre, *map(Tag, tag))
 
 def _close_server_client(func, server):
@@ -134,7 +134,7 @@ class Node:
         return self.event.is_set()
 
     def __repr__(self) -> str:
-        return "[{}:{}] {}".format(self.addr, self.port, "X" if self else "O")
+        return "[{}:{}]{}".format(self.addr, self.port, "X" if self else "0")
 
     # def __str__(self) -> str:
     #     return ""
@@ -168,6 +168,10 @@ class NodeClient(Node):
 
         self._dispatchers =  {**self._dispatchers, **{d.__name__: d for d in dispatchers}}
 
+    def open(self):
+        self._encrypt["secret"] = 1
+        super().open()
+
     def send(self, data: (str, Data), *prefixes: str):
         data = Data(data.data, *prefixes, *data.prefixes) if isinstance(data, Data) else Data(data, *prefixes)
         self._queues["send"].put(data_send(data))
@@ -178,7 +182,7 @@ class NodeClient(Node):
         self._outputs["data"].extend(clear_queue(self._queues["handle"]))
         return self._outputs["data"]
 
-    def recv(self, *prefixes, wait: int=False, timeout: int=False) -> [Data,]: # interval=0
+    def recv(self, *prefixes, wait: int=False, timeout: int=False, err=False) -> [Data,]: # interval=0
         require = Data(False, *prefixes)
         start_time = time.time()
         results = [data for data in self.output if all(prefix in data.prefixes for prefix in require.prefixes) and all(tag in data.tags for tag in require.tags)]
@@ -193,10 +197,10 @@ class NodeClient(Node):
                     self._outputs["data"].remove(res)
                 except ValueError:  pass
             if not self:
-                results.extend(self.recv(require.prefixes))
+                results.extend(self.recv(*require.prefixes, *map(Tag, require.tags)))
                 break
             # time.sleep(interval)
-        if not results and wait:
+        if not results and wait and ((not timeout) or err):
             raise error.CloseError(self)
         return results
 
@@ -222,7 +226,7 @@ class NodeClient(Node):
         return data, old
 
     @error.handle(error.DispatchError)
-    @error.log
+    @error.log()
     def _handle(self, data: Data):
         for prefix in data.prefixes:
             try:
@@ -233,7 +237,7 @@ class NodeClient(Node):
         self._queues["handle"].put(data)
 
     @error.handle(error.EncryptionError)
-    @error.log
+    @error.log(error.EncryptionError)
     @error.handle(queue.Empty)
     def _thread_handle(self):
         data = self._queues["recv"].get(False)
@@ -256,7 +260,7 @@ class Client(NodeClient):
         self._encrypt["password"] = str(password)
 
     @error.handle((ConnectionError, OSError), error.CloseError, close=True)
-    @error.log
+    @error.log()
     def open(self):
         if not self:
             self.c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -264,17 +268,14 @@ class Client(NodeClient):
             super().open()
 
             #--- Diffie-Hellman ---#
-            if self.recv("ENCRYPT", Tag("END"), wait=True)[0].data != "True":
+            if self.recv("ENCRYPT", Tag("END"), wait=True, err=True)[0].data != "True":
                 raise error.CloseError(self, "Encryption Failure")
+            self.send(True, "DATA", "ENCRYPT", Tag("END"))
 
             #--- Password ---#
             self.send(self._encrypt["password"], "DATA", "PASSWORD")
-            try:
-                if self.recv("PASSWORD", wait=True)[0].data != "True":
-                    raise error.CloseError(self)
-            except error.CloseError:
-                raise error.CloseError(self, "Password Incorrect") from None
-
+            if self.recv("PASSWORD", wait=True, err=True)[0].data != "True":
+                raise error.CloseError(self, "Password Incorrect")
 
 class ServerClient(NodeClient):
 
@@ -290,21 +291,20 @@ class ServerClient(NodeClient):
         # self.server.connections.remove(self)
 
     @error.handle(error.CloseError, close=True)
-    @error.log
+    @error.log()
     def open(self):
         super().open()
-        print("Connection:", self)
 
         #--- Diffie–Hellman ---#
         if self.server._encrypt["base"]:
             self.send(True, "ENCRYPT", Tag("CLIENT"))
         else:
             self.send(True, "DATA", "ENCRYPT", Tag("END"))
-        if self.recv("ENCRYPT", Tag("END"), wait=True, timeout=5)[0].data != "True":
+        if self.recv("ENCRYPT", Tag("END"), wait=True, timeout=5, err=True)[0].data != "True":
             raise error.CloseError(self, "Encryption Failure")
 
         #--- Password ---#
-        if self.recv("PASSWORD", wait=True, timeout=5)[0].data == self.server._encrypt["password"]:
+        if self.recv("PASSWORD", wait=True, timeout=5, err=True)[0].data == self.server._encrypt["password"]:
             self.send(True, "DATA", "PASSWORD")
         else:
             self.send(False, "DATA", "PASSWORD").join()
@@ -321,7 +321,7 @@ class Server(Node):
         self.connections = set()
         self._encrypt = {
             "modulus": secrets.randbits(32),
-            "base": secrets.choice(range(2, 4)),
+            "base": secrets.choice(range(2, 4)) if encrypt else False,
             "password": str(password),
         }
 

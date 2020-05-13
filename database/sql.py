@@ -3,6 +3,11 @@ from database.logic import Table, Column, Condition
 import sqlite3
 import enum
 
+def type_value(value):
+    if isinstance(value, type) and issubclass(value, Serialize):
+        return value.__name__
+    return enum_val(value)
+
 def enum_val(value, type=enum.Enum) -> str:
     return value.value if isinstance(value, type) else str(value)
 
@@ -11,12 +16,24 @@ def str_types(string: str) -> Type:
     while string:
         string = string.strip()
         for t in Type:
-            ts = enum_val(t)
+            ts = type_value(t)
             pos = string.find(ts)
             if pos != -1:
                 types.append(t)
                 string = string[:pos]+string[len(ts)+pos:]
     return tuple(types)
+
+class _MetaSerialize(type):
+    def __init__(cls, name, bases, attr):
+        sqlite3.register_adapter(cls, cls.serial_sql)
+        sqlite3.register_converter(name, cls.serial_pyc)
+        return super().__init__(name, bases, attr)
+
+class Serialize(metaclass=_MetaSerialize):
+    def serial_sql(self) -> bytes:
+        raise TypeError("Must SubClass Serialize")
+    def serial_pyc(data) -> "Serialize":
+        raise TypeError("Must Subclass Serialize")
 
 class Sql:
     """Sql file management"""
@@ -33,7 +50,7 @@ class Sql:
         tid = self.insert("__metadata__", ("name", table), ("columns", len(columns)), id=True)
         for index, column in enumerate(columns):
             link = ("lid", column.link._id) if column.link else ("lid", 0)
-            column._id = self.insert("__columndata__", ("tid", tid), ("loc", index), ("name", column.name), ("type", " ".join(map(enum_val, column.types))), link, id=True)
+            column._id = self.insert("__columndata__", ("tid", tid), ("loc", index), ("name", column.name), ("type", " ".join(map(type_value, column.types))), link, id=True)
         tbl = Table(table, *columns, id=tid)
         self.tables[tbl.name] = tbl
         return tbl
@@ -47,7 +64,7 @@ class Sql:
     def selectID(self, table: str, *conditions: Condition, all=False) -> int:
         """Return ID of Row"""
         res = self.select(table, *conditions, columns=("id",), all=all)
-        return res[0] if res else False
+        return ((r[0] for r in res) if all else res[0]) if res else False
 
     def select(self, table: str, *conditions: Condition, columns:tuple=("*",), all=True) -> tuple:
         """Return Columns if Condition is Met"""
@@ -65,7 +82,7 @@ class Sql:
         return res if res else False
 
     def create_table(self, name: str, *columns: Column):
-        cols = ("{} {}".format(col.name, " ".join(map(enum_val, col.types))) for col in columns)
+        cols = ("{} {}".format(col.name, " ".join(map(type_value, col.types))) for col in columns)
         foreign = ("FOREIGN KEY ({}) REFERENCES {}(id)".format(col.name, col.link.name) for col in columns if col.link is not None)
         return self.s_table(name, *cols, *foreign)
 
@@ -136,11 +153,3 @@ class Sql:
         self.open()
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
-
-# def sql_err(func):
-#     def sql_err(self, *args, **kwargs):
-#         try:
-#             return func
-#         except NotImplementedError as e:
-#             raise
-#     return sql_err

@@ -1,2 +1,7 @@
-from engine.error.base import FatalError, RenderError, EventError, EntityError
-from engine.error.entity import EntityComponentError, EntityComponentGetError
+from engine.error.base import EngineError, CoreError, RenderError, EventError, ECSError
+from engine.error import render
+from engine.error import ecs
+
+__all__ = ["EngineError", "CoreError", "RenderError", "EventError", "ECSError"
+"render", "ecs",
+]

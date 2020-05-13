@@ -16,6 +16,9 @@ class Polygon(Primitive):
     def Transform(self, translate: Vector=Vector(0, 0), rotation: float=0.0, scale: Vector=Vector(1, 1)):
         return self.__class__(*(v.rotate(rotation).map(scale) + translate for v in self.pos))
 
+    def _volatile(self, other) -> bool:
+        return all((i == j for i,j in zip(self.pos, other.pos)))
+
     @classmethod
     def Quad(self, width: int=1, height: int=1, skew: float=0.0, centre=True):
         if centre:
@@ -27,5 +30,5 @@ class Polygon(Primitive):
     @classmethod
     def Circle(self, radius: float=1.0, centre=True, res=1):
         if centre:
-            vec = Vector(0, -0.5)
+            vec = Vector(0, -1.0)
         return self(*(vec.rotate(angle) for angle in range(0, 360, int(res)))).Transform(scale=Vector(radius, radius))

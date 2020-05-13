@@ -1,8 +1,9 @@
 from engine.ecs.system import System
-from engine.ecs.world import World
+
+__all__ = ["Script"]
 
 class Script(System):
 
-    def update(self):
-        for component in World.active().Data().scripts:
+    def update(self, app):
+        for component in app.world._script_components:
             component.update()

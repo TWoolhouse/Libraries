@@ -89,6 +89,9 @@ class RLY(Dispatch):
 
 class ENCRYPT(Dispatch):
 
+    TIMEOUT = 1.0
+    ATTEMPTS = 25
+
     def handle(self):
         if "CLIENT" in self.data.tags:
             self.client()
@@ -117,9 +120,14 @@ class ENCRYPT(Dispatch):
         # Update Encryption Key
         self.node._encrypt["secret"] = sk
         # Send Server Heartbeat until Client receives confirmation they are both connected
-        self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
-        while not self.node.recv("ENCRYPT", Tag("ENC"), wait=True, timeout=0.75):
+        count = 0
+        while count < self.ATTEMPTS:
+            count += 1
             self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+            if self.node.recv("ENCRYPT", Tag("ENC"), wait=True, timeout=self.TIMEOUT):
+                break
+        else:
+            raise error.CloseError(self.node)
         self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
         # Send End to release lock
         self.node.send(True, "DATA", "ENCRYPT", Tag("END"))
@@ -144,9 +152,14 @@ class ENCRYPT(Dispatch):
         # Update Encryption Key
         self.node._encrypt["secret"] = sk
         # Send Client Heartbeat until Server receives confirmation they are both connected
-        self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
-        while not self.node.recv("ENCRYPT", Tag("ENC"), wait=True, timeout=0.75):
+        count = 0
+        while count < self.ATTEMPTS:
+            count += 1
             self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
+            if self.node.recv("ENCRYPT", Tag("ENC"), wait=True, timeout=self.TIMEOUT):
+                break
+        else:
+            raise error.CloseError(self.node)
         self.node.send(True, "DATA", "ENCRYPT", Tag("ENC"))
         # Send End to release lock
         self.node.send(True, "DATA", "ENCRYPT", Tag("END"))

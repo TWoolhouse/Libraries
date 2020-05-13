@@ -1,16 +1,35 @@
+from engine.ecs.entity import Entity
 from engine.ecs.component import Component
-from engine.ecs.world import World
-import engine.event
+from engine.core.application import app as Application
+
+from engine.core.layer import Data as LayerData
+
+
+__all__ = ["Event"]
 
 class Event(Component):
-    def __init__(self, type=engine.event.Event, func=lambda self, event: None):
-        self._event_type = type
-        self._func = func
-        World.active().Data().event_handles.append(self)
 
-    def event(self, event: engine.event.Event):
-        self._func(event)
+    def __init__(self, func: callable, type: str="CONTROL", enabled: bool=True):
+        self.__func, self.__type, self.__enabled = func, type, enabled
+
+    def initialize(self):
+        self._s_app_world = Application().world
+        self.layer_data = LayerData(getattr(self._s_app_world.events.type, self.__type), self.__func, self.__enabled)
+        self._s_app_world.events.add(self.layer_data)
+        self._s_app_world.events.compile()
 
     def terminate(self):
-        World.active().Data().event_handles.remove(self)
-        return True
+        self._s_app_world.events.remove(self.layer_data)
+        self._s_app_world.events.compile()
+
+    def func(self, func: callable):
+        try:
+            self.layer_data.func = func
+        except AttributeError:
+            self.__func = func
+
+    def toggle(self, flag: bool=None) -> bool:
+        try:
+            return self._s_app_world.events.activate(self.layer_data, flag)
+        except AttributeError:
+            self.__enabled = flag if isinstance(flag, bool) else not self.__enabled
