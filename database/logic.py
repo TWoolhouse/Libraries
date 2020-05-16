@@ -32,7 +32,7 @@ class Column(ID):
     
     @classmethod
     def Foreign(cls, name: str, link: Table):
-        return cls(name, Type.Integer, Type.NotNull, link=link)
+        return cls(name, Type.Integer, link=link)
 
 class Table(ID):
 

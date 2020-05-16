@@ -111,11 +111,15 @@ class Sql:
 
     def exec(self, stmt: str, params=None):
         """Execute a Raw SQL Statement"""
-        if params:
-            # print(stmt, params)
-            return self.cursor.execute(stmt, params)
-        # print(stmt)
-        return self.cursor.execute(stmt)
+        try:
+            if params:
+                # print(stmt, params)
+                return self.cursor.execute(stmt, params)
+            # print(stmt)
+            return self.cursor.execute(stmt)
+        except (sqlite3.InterfaceError, sqlite3.OperationalError) as err:
+            print(stmt, params)
+            raise
 
     def s_table(self, table: str, *columns: str):
         """Underlying SQL Statement for creating a table"""
