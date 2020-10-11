@@ -24,6 +24,9 @@ class Vector(object):
     def __abs__(self) -> "Vector":
         return self.__class__(*(abs(i) for i in self))
 
+    def __neg__(self) -> "Vector":
+        return self.__class__(*(-i for i in self))
+
     def int(self) -> "Vector":
         return self.__class__(*(int(i) for i in self))
 
