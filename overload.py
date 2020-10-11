@@ -21,14 +21,3 @@ def dispatch(*types, default=False):
             raise NotImplementedError()
         return dispatch
     return dispatch
-
-# @dispatch(default=True)
-# def test(name):
-#     print(type(name), name)
-#
-# @dispatch(int)
-# def test(val1):
-#     print("int", type(val1), val1)
-#
-# test(5)
-# test([2])
