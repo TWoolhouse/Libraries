@@ -1,21 +1,41 @@
+from typing import Union
+
 __all__ = ["Data", "Tag"]
 
 class Tag:
-
-    def __init__(self, tag):
+    """Create a Tag"""
+    def __init__(self, tag: str):
+        """Create a Tag"""
         self.tag = tag
 
-class Data:
+    def __eq__(self, other: Union["Tag", str]):
+        if isinstance(other, self.__class__):
+            return self.tag == other.tag
+        return self.tag == other
 
-    def __init__(self, data: (str, bytes), *prefixes: str):
-        self.prefixes = []
-        self.tags = []
-        for header in prefixes:
-            if isinstance(header, Tag):
-                self.tags.append(str(header.tag).upper())
-            else:
-                self.prefixes.append(str(header).upper())
-        self.data = data
+    def __hash__(self) -> int:
+        return self.tag.__hash__()
 
     def __repr__(self) -> str:
-        return "<{} [{}] ({}) : {}>".format(self.__class__.__name__, "-".join(self.prefixes), ",".join(self.tags), self.data)
+        return f"T{self.tag}"
+
+class Data:
+    """Packet to Send over Network"""
+
+    def __init__(self, data: Union[str, bytes], *header: Union[str, Tag]):
+        """Packet to Send over Network"""
+        self.head = []
+        self.tag = []
+        self.data = data
+
+        for prefix in header:
+            if isinstance(prefix, Tag):
+                self.tag.append(prefix)
+            else:
+                self.head.append(prefix)
+
+    def __repr__(self) -> str:
+        return "{}<[{}] ({}) : {}>".format(self.__class__.__name__, "-".join(self.prefixes), ",".join(self.tags), self.data)
+
+    def __hash__(self) -> int:
+        return id(self)
