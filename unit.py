@@ -40,6 +40,8 @@ class Unit:
         return int(self.value)
     def __str__(self):
         return str(self.num)+" "+str(self.unit)
+    def __round__(self, ndigits=None):
+        return self.convert(round(self.value, ndigits))
 
     def __getitem__(self, unit):
         return self.__class__(self.value/self.get_conversion(unit), unit)
@@ -104,7 +106,10 @@ class Unit:
         if type(other) == type(self):
             return self.convert(getattr(self.value, opp)(other.value))
         elif type(other) in (int, float):
-            return self.convert(getattr(self.value, opp)(other))
+            try:
+                return self.convert(getattr(self.value, opp)(other))
+            except TypeError:
+                return self.convert(getattr(float(self.value), opp)(other))
         else:
             raise TypeError(self.opp_err(opp.replace("__",""), other))
 
@@ -163,7 +168,7 @@ def create(name, *units):
 
 #---Setup----------------------------------------------------------------------#
 
-new("Distance", "m", ls=299792458, ly=9.4607304725808*10**15)
+new("Length", "m", ls=299792458, ly=9.4607304725808*10**15)
 new("Time", "s", min=60, h=3600, day=86400, week=604800, month=2592000, year=31556952)
 new("Mass", "g")
 new("Data", "b", B=8)
