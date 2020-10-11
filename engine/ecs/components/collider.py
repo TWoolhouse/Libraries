@@ -1,7 +1,7 @@
-from engine.ecs.entity import Entity
-from engine.ecs.component import Component
-from engine.ecs.core.transform import Transform
-from engine.core.application import app as Application
+from ..entity import Entity
+from ..component import Component
+from ..core.transform import Transform
+from ...core.application import app as Application
 
 __all__ = ["Collider"]
 
@@ -14,4 +14,8 @@ class Collider(Component):
         self.collision = set()
 
     def initialize(self):
-        self._child_entity = Application().world.instantiate(parent=self.entity, transform=self.transform, id=False)
+        self.__world = Application().world
+        self.__entity = self.__world.instantiate(parent=self.entity, transform=self.transform, id=False)
+
+    def terminate(self):
+        self.__world.destroy(self.__entity)

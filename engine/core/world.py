@@ -1,12 +1,12 @@
 from collections import defaultdict
 import random
 
-import engine.error
-from engine.core import layer
-from engine.event.event import Event
+from .. import error
+from . import layer
+from ..event.event import Event
 
-from engine.ecs.core.parent import Parent, Component, Entity
-from engine.ecs.core.transform import Transform
+from ..ecs.core.parent import Parent, Component, Entity
+from ..ecs.core.transform import Transform
 
 ENTITY_LIMIT = 2 ** 8
 # 255 Limit
@@ -17,8 +17,10 @@ ENTITY_LIMIT = 2 ** 8
 class World:
 
     def __init__(self):
-        __layer_type__system = layer.Type.new("SystemLayer", PRE=10, SCRIPT=20, PHYSICS=30, RENDER=40, POST=50)
-        __layer_type__event = layer.Type.new("EventLayer", WINDOW=10, UI=20, CONTROL=30)
+        # __layer_type__system = layer.Type.new("SystemLayer", PRE=10, SCRIPT=20, PHYSICS=30, RENDER=40, POST=50)
+        # __layer_type__event = layer.Type.new("EventLayer", WINDOW=10, UI=20, CONTROL=30)
+        __layer_type__system = layer.Type("SystemLayer", PRE=10, SCRIPT=20, PHYSICS=30, RENDER=40, POST=50)
+        __layer_type__event = layer.Type("EventLayer", WINDOW=10, UI=20, CONTROL=30)
 
         self._entities_null = set()
         self._entities = {}
@@ -29,9 +31,9 @@ class World:
         self.events = layer.Stack(__layer_type__event)
 
     def initialize(self):
-        for entity in self._entities.values():
-            entity.initialize()
         for entity in self._entities_null:
+            entity.initialize()
+        for entity in self._entities.values():
             entity.initialize()
 
         self.systems.compile(layer.Mask(self.systems.type.NONE, invert=True))
@@ -40,9 +42,9 @@ class World:
         self.systems.compile(layer.Mask(self.systems.type.NONE))
         self.events.compile(layer.Mask(self.events.type.NONE))
 
-        for entity in self._entities_null:
+        for entity in tuple(self._entities.values()):
             entity.terminate()
-        for entity in self._entities.values():
+        for entity in tuple(self._entities_null):
             entity.terminate()
 
     def update(self, application):
@@ -65,17 +67,21 @@ class World:
             for component in self._components[type_]:
                 try:
                     yield (component, *map(component.Get, types))
-                except engine.error.ecs.GetComponentError: continue
+                except error.ecs.GetComponentError: continue
         else:
             yield from self._components[type_]
 
-    def instantiate(self, *components: Component, parent: Entity=None, transform: Transform=Transform(), id: bool=True) -> Entity:
+    def instantiate(self, *components: Component, parent: Entity=None, transform: Transform=None, id: bool=True) -> Entity:
         parent = Parent(parent)
+        if transform is None:
+            transform = Transform()
         if id:
             while len(self._entities) < ENTITY_LIMIT-1:
                 idv = random.randint(1, ENTITY_LIMIT)
                 if idv not in self._entities:
                     break
+            else:
+                raise error.ecs.EntityLimitError(self, ENTITY_LIMIT)
             ent = Entity(parent, transform, *components, id=idv)
             self._entities[idv] = ent
         else:

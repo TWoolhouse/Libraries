@@ -1,5 +1,5 @@
-from engine.event.event import Event
-import engine.input.keys
+from .event import Event
+from ..input import keys as ikeys
 
 __all__ = ["Key", "KeyPress", "KeyRelease", "KeyRepeat"]
 
@@ -7,7 +7,7 @@ class Key(Event):
 
     def __init__(self, key: int):
         super().__init__()
-        self.key = engine.input.keys.Key(key)
+        self.key = ikeys.Key(key)
 
     def __repr__(self) -> str:
         return "{}".format(self.key.name)
@@ -15,14 +15,14 @@ class Key(Event):
 class KeyPress(Key):
     def __init__(self, key: int):
         super().__init__(key)
-        engine.input.keys._keys[key] = True
+        ikeys._keys[key] = True
 
 class KeyRelease(Key):
     def __init__(self, key: int):
         super().__init__(key)
-        engine.input.keys._keys[key] = False
+        ikeys._keys[key] = False
 
 class KeyRepeat(Key):
     def __init__(self, key: int):
         super().__init__(key)
-        engine.input.keys._keys[key] = True
+        ikeys._keys[key] = True

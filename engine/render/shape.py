@@ -1,7 +1,7 @@
-from engine.render.primitive import Primitive
+from .primitive import Primitive
 from vector import Vector
 
-__all__ = ["Polygon", "Rectangle", "Circle"]
+__all__ = ["Polygon"]
 
 class Polygon(Primitive):
 
@@ -20,11 +20,14 @@ class Polygon(Primitive):
         return all((i == j for i,j in zip(self.pos, other.pos)))
 
     @classmethod
-    def Quad(self, width: int=1, height: int=1, skew: float=0.0, centre=True):
+    def Quad(self, width: int=1, height: int=1, skew: float=0.0, centre=True, hollow: float=0.0):
         if centre:
             poly = self(Vector(-0.5, -0.5), Vector(0.5, -0.5), Vector(0.5, 0.5), Vector(-0.5, 0.5))
         else:
             poly = self(Vector(0, 0), Vector(1, 0), Vector(1, 1), Vector(0, 1))
+        if hollow:
+            hollow /= 2
+            poly = self(*poly.pos, poly.pos[0] + Vector(0, hollow), poly.pos[0] + Vector(hollow, hollow), poly.pos[3] + Vector(hollow, -hollow), poly.pos[2] - Vector(hollow, hollow), poly.pos[1] + Vector(-hollow, hollow), poly.pos[0] + Vector(0, hollow))
         return poly.Transform(rotation=skew, scale=Vector(width, height))
 
     @classmethod

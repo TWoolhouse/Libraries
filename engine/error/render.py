@@ -1,4 +1,4 @@
-from engine.error.base import RenderError
+from .base import RenderError
 
 __all__ = ["PrimitiveError", "CanvasError"]
 

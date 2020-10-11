@@ -1,8 +1,8 @@
-from engine.ecs.system import System
-from engine.ecs.components.fps_counter import FPS as CFPS
+from ..system import System
+from ..components.fps_counter import FPS as CFPS
 
 from collections import deque
-from engine.core.deltatime import DeltaTime
+from ...core.deltatime import DeltaTime
 
 __all__ = ["FPS"]
 

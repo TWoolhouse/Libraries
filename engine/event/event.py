@@ -20,6 +20,8 @@ class Event(metaclass=_Event):
         return ""
 
     def dispatch(self, event, func=False):
+        if self.handled:
+            return False
         if isinstance(func, bool):
             if isinstance(self, event):
                 self.handled = func

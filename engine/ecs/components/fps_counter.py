@@ -1,7 +1,7 @@
-from engine.ecs.entity import Entity
-from engine.ecs.component import Component
-from engine.ecs.components.render import Render as CRenders
-from engine.render.text import Text as RText
+from ..entity import Entity
+from ..component import Component
+from .render import Render as CRenders
+from ...render.text import Text as RText
 
 __all__ = ["FPS"]
 

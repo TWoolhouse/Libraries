@@ -1,8 +1,7 @@
-from engine.render.render import Render
-from engine.render.primitive import Primitive
-from engine.render.shape import Polygon
-from engine.render.text import Text
+from .primitive import Primitive
+from .shape import Polygon
+from .text import Text, Font
 
-__all__ = ["Render", "Primitive",
-"Polygon", "Text",
+__all__ = ["Primitive",
+"Polygon", "Text", "Font",
 ]

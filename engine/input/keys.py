@@ -1,4 +1,4 @@
-from engine.enums.keys import Key
+from ..enums.keys import Key
 
 _keys = { # Hashmap of all key codes to current status
     key.value: False  for key in Key

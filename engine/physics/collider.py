@@ -1,6 +1,6 @@
 import enum
 from vector import Vector
-from engine.ecs.components.collider import Collider
+from ..ecs.components.collider import Collider
 
 __all__ = ["detect", "Point", "Plane", "Rectangle", "Circle"]
 

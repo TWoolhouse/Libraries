@@ -1,4 +1,4 @@
-from engine._settings import collider
+from .._settings import collider
 
 class Settings:
 

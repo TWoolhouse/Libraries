@@ -1,5 +1,5 @@
-import engine.error
-from engine.ecs.component import Component
+from .. import error
+from .component import Component
 
 __all__ = ["Entity"]
 
@@ -14,7 +14,7 @@ class Entity:
         try:
             return self._component_types[component]
         except KeyError:
-            raise engine.error.ecs.GetComponentError(self, component) from None
+            raise error.ecs.GetComponentError(self, component) from None
 
     def initialize(self) -> bool:
         for component in self._components:
@@ -22,15 +22,21 @@ class Entity:
                 continue
             component.entity = self
             if res := component.initialize():
-                raise engine.error.ecs.InitializeComponent(self, component, res)
+                raise error.ecs.InitializeComponent(self, component, res)
             component._running = True
         return True
 
     def terminate(self) -> bool:
         for component in self._components:
-            if res := component.terminate():
-                raise engine.error.ecs.TerminateComponent(self, component, res)
-            component._running = False
+            if component._running:
+                try:
+                    res = component.terminate()
+                except Exception as e:
+                    raise error.ecs.TerminateComponent(self, component, e) from e
+                finally:
+                    component._running = False
+                if res:
+                    raise error.ecs.TerminateComponent(self, component, res)
         return True
 
     def __repr__(self) -> str:

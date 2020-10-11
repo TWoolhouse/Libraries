@@ -1,9 +1,9 @@
-from engine.ecs.entity import Entity
-from engine.ecs.component import Component
+from ..entity import Entity
+from ..component import Component
 from vector import Vector
 
-import engine.error
-from engine.ecs.core.parent import Parent
+from ... import error
+from .parent import Parent
 
 __all__ = ["Transform"]
 
@@ -17,7 +17,7 @@ class Transform(Component):
     def initialize(self):
         try:
             self.parent = self.Get(Parent).parent().Get(Transform)
-        except engine.error.ecs.ParentError:
+        except error.ecs.ParentError:
             self.parent = None
 
     @property

@@ -1,4 +1,4 @@
-from engine.enums.mouse import Mouse
+from ..enums.mouse import Mouse
 from vector import Vector
 
 _mouse = { # Hashmap of all mouse codes to current status

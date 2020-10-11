@@ -1,9 +1,9 @@
-from engine.ecs.system import System
-from engine.ecs.components.collider import Collider as CCollider
-from engine.physics import collider
-from engine.core.application import app as Application
-from engine.core import layer
-from engine._settings.collider import Setting
+from ..system import System
+from ..components.collider import Collider as CCollider
+from ...physics import collider
+from ...core.application import app as Application
+from ...core import layer
+from ..._settings.collider import Setting
 
 __all__ = ["Collider"]
 

@@ -1,4 +1,4 @@
-from engine.event.event import Event
+from .event import Event
 
 __all__ = ["Window", "WindowClose", "WindowResize"]
 
@@ -11,6 +11,7 @@ class WindowClose(Window):
 class WindowResize(Window):
 
     def __init__(self, width, height):
+        super().__init__()
         self.width, self.height = width, height
 
     def __repr__(self) -> str:

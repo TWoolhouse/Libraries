@@ -1,6 +1,16 @@
-from engine.error.base import ECSError
+from .base import ECSError
 
-__all__ = ["EntityLimitError", "GetComponentError", "InitializeComponent", "TerminateComponent"]
+__all__ = ["ComponentTypeError", "EntityLimitError", "GetComponentError", "InitializeComponent", "TerminateComponent"]
+
+class ComponentTypeError(ECSError):
+    def __init__(self, component, expected=None):
+        self.component = component
+        self.expected = expected
+
+    def __str__(self) -> str:
+        if self.expected is None:
+            return f"{self.component} is not the correct type"
+        return f"Expected: '{self.expected}' Got {self.component}"
 
 class EntityLimitError(ECSError):
 

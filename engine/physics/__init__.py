@@ -1,1 +1,1 @@
-from engine.physics import collider
+from . import collider

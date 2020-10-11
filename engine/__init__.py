@@ -1,18 +1,24 @@
 import sys
 from vector import Vector
-import engine.core
-from engine.core import layer
-import engine.event
-import engine.input
-import engine.render
-import engine.ecs
-import engine.component
-import engine.ecs.systems
-import engine.physics
-from engine.core.application import main, app, instantiate
+from . import core
+from .core import layer
+from . import event
+from . import input
+from . import render
+from . import ecs
+from . import component
+from . import physics
+from .core.application import main, app, instantiate
 
 class __Module(sys.modules[__name__].__class__):
-    def __call__(self) -> engine.core.Application:
+    # Do janky things
+    # Init the systems module so its already imported
+    from .ecs import systems
+    # Add Application to render.text module so Font is able to access the current App
+    setattr(render.text, "Application", app)
+
+    # Calls to "engine()" is "engine.app()"
+    def __call__(self) -> core.Application:
         return app()
 
 sys.modules[__name__].__class__ = __Module

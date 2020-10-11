@@ -1,4 +1,5 @@
-from engine.core.application import Application
-from engine.core.deltatime import DeltaTime
-from engine.core.world import World
-from engine.core.program import Program
+# Core contains fundamentals to the engine that will only be used a limited number of times
+from .application import Application
+from .deltatime import DeltaTime
+from .world import World
+from .program import Program

@@ -1,5 +1,6 @@
-from engine.ecs.components.fps_counter import FPS
-from engine.ecs.components.render import Render
-from engine.ecs.components.script import Script
-from engine.ecs.components.collider import Collider
-from engine.ecs.components.event import Event
+from .fps_counter import FPS
+from .render import Render, RenderMulti, RenderBatch
+from .script import Script
+from .collider import Collider
+from .event import Event
+from .button import Button
