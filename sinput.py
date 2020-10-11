@@ -1,5 +1,6 @@
 import time
 import ctypes
+import functools as __functools
 import keys
 
 # Import the SendInput object
@@ -34,24 +35,24 @@ class _MouseInput(ctypes.Structure):
         ("dwExtraInfo", PUL)
     ]
 
-class InputI(ctypes.Union):
+class _InputI(ctypes.Union):
     _fields_ = [
         ("ki", _KeyboardInput),
         ("mi", _MouseInput),
         ("hi", _HardwareInput)
     ]
 
-class Input(ctypes.Structure):
+class _Input(ctypes.Structure):
     _fields_ = [
         ("type", ctypes.c_ulong),
-        ("ii", InputI)
+        ("ii", _InputI)
     ]
 
 def _send(func):
     def _send(type, *args, **kwargs):
-        ii = InputI()
+        ii = _InputI()
         func(ii, *args, **kwargs)
-        x = Input(ctypes.c_ulong(type), ii)
+        x = _Input(ctypes.c_ulong(type), ii)
         SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
     return _send
 
@@ -122,3 +123,12 @@ def key(code, length=0):
     key_press(code)
     time.sleep(length)
     key_release(code)
+
+def modify(key: keys, func):
+    @__functools.wraps(func)
+    def modifier(*args, **kwargs):
+        key_press(key)
+        r = func(*args, **kwargs)
+        key_release(key)
+        return r
+    return modifier
