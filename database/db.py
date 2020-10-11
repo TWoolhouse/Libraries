@@ -1,288 +1,232 @@
-from database.enums import Type, OP
-from database.logic import Table, Column, Condition
-import database.sql
-import database.logic
-
-from interface import Interface
+import debug
+from typing import Any, Sequence, Tuple, Mapping, Union, overload
+from .sql import *
+from .sql import fmt_name
 import asyncio
-import threading
-import queue
+import multiprocessing
+from interface import Interface
 
-__all__ = ["Database", "ThreadDatabase", "AsyncDatabase", "Serialize"]
+__all__ = ["Database", "DatabaseAsync"]
 
-Serialize = database.sql.Serialize
+class DBInterface:
 
-class Database:
-    """A interface to the database file"""
+    def __init__(self, name: str, db: "Database", cursor: Cursor):
+        self._db = db
+        self.__name = name
+        self.__c = cursor
 
-    def __init__(self, filepath: str, new: bool = False):
-        self.filepath = filepath
-        self.sql = database.sql.Sql(self.filepath+".db")
-        if new:
-            with self:
-                self.new()
+    def __getitem__(self, name: str) -> Table:
+        return self._db[name]
 
-    def new(self):
-        """Create new/overwrite DB file"""
-        self.sql.new_file()
-        self.sql.new()
+    def exec(self, stmt: str, params: Sequence[Any]=()):
+        """Execute Raw SQL Statement"""
+        return self.__c.exec(stmt, params)
+        # raise RuntimeError("Function Should have been Overriden")
+    def insert(self, tbl: Table, *vals: Tuple[Any, ...], cols: Mapping[Union[Column, str, int], Any]={}) -> int:
+        return self.__c.insert(tbl, *vals, cols=cols)
+    def fetch(self, amount: int=1) -> [Row,]:
+        """Fetch Rows From Last Selection
+        Amount: 0 is All"""
+        return self.__c.fetch(amount)
+    
+    @overload
+    def select(self, tbl: Table, *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> fetch:
+        ...
+    @overload
+    def select(self, tbl: Join, *conditions: Tuple[Condition, ...], cols: Sequence[Column]=()) -> fetch:
+        ...
+    def select(self, tbl, *conditions, cols=()) -> fetch:
+        """Select"""
+        return self.__c.select(tbl, *conditions, columns=cols)
+
+    def finish(self):
+        self._db._close_dbi(self.__name)
 
     def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        self.finish()
+
+class Database:
+
+    _get_interface = DBInterface
+
+    def __init__(self, filename: str):
+        self.filename = filename
+        self.__connection = None
+        self.__cursors = {}
+        self.__tables = {}
+
+    def connection(self) -> bool:
+        return bool(self.__connection)
+
+    def open(self) -> bool:
+        if not self.connection():
+            debug.print(f"Open {self.__class__.__name__} in {self.filename}")
+            self.__connection = connection(self.filename)
+            self.__cursors["default"] = None
+            for k,c in self.__cursors.items():
+                self.__cursors[k] = self.__interface(k)
+            self.__tables = self.__connection.cursor().load({})
+            return True
+        return False
+
+    def close(self) -> bool:
+        if self.__connection:
+            debug.print(f"Close {self.__class__.__name__} in {self.filename}")
+            self.__connection.close()
+            return True
+        return False
+
+    def _close_dbi(self, dbi_name: str):
+        self.__cursors.pop(dbi_name)
+        self.__connection.close_cursor(dbi_name)
+
+    def __call__(self, name: str="default") -> DBInterface:
+        try:
+            return self.__cursors[name]
+        except KeyError:
+            c = self.__cursors[name] = self.__interface(name)
+            return c
+
+    def __interface(self, name: str) -> DBInterface:
+        return self._get_interface(name, self, self.__connection.cursor(name))
+
+    interface = __call__
+
+    def __getitem__(self, name: str) -> Table:
+        return self.__tables[fmt_name(name)]
+
+    def __enter__(self):
+        debug.print("Opening")
         self.open()
         return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, *args):
+        debug.print("Closing")
         self.close()
 
-    def __getitem__(self, key: str) -> Table:
-        return self.sql.get_table(database.logic.name_table(key))
-
-    def open(self):
-        """Open Database Connection"""
-        self.sql.open()
-
-    def close(self):
-        """Close Database File"""
-        self.sql.close()
-
-    def exec(self, stmt: str, params: tuple=None):
-        """Execute Raw SQL Statements"""
-        return self.sql.exec(stmt, params)
-
-    def table(self, name: str, *columns: Column) -> Table:
-        """Create a New Table"""
-        return self.sql.table(database.logic.name_table(name), *columns)
-
-    def load(self):
-        """Load all Tables in Database"""
-        for table in self.sql.select("__metadata__", Condition("id", 0, OP.NE), columns=("id",)):
-            id = table[0]
-            self.sql.get_tableID(id)
-        return self
-
-    @property
-    def tables(self) -> tuple:
-        """Return Currently Loaded Tables"""
-        return tuple(self.sql.tables.keys())
-
-    def insert(self, table: Table, *values, columns: dict={}, id=False):
-        """Insert a Row into Table
-
-        columns: dict[Column, str, int] = value
-        """
-        return self.sql.insert(table.name, *((database.logic.column_name(table, col), value) for col, value in (*zip(table.columns, values), *columns.items())), id=id)
-
-    def select(self, table: Table, *conditions: Condition, columns:tuple=("*",), all=True):
-        """Select Columns from Table Where Conditions are Met"""
-        conditions = (Condition("id", conditions[0]),) if len(conditions) == 1 and isinstance(
-            conditions[0], int) else (database.logic.condition_name(table, c, i) for i, c in enumerate(conditions))
-        return self.sql.select(table.name, *conditions, columns=(database.logic.column_name(table, col) for col in columns), all=all)
-
-    def selectID(self, table: Table, *conditions: Condition, all=False):
-        """Select ID from Table Where Conditions are Met"""
-        conditions = (Condition("id", conditions[0]),) if len(conditions) == 1 and isinstance(
-            conditions[0], int) else (database.logic.condition_name(table, c, i) for i, c in enumerate(conditions))
-        return self.sql.selectID(table.name, *conditions, all=all)
-
-class ThreadDatabase(Database):
-
-    def __init__(self, filepath: str, new: bool=False):
-        super().__init__(filepath, new=False)
-        self._event = threading.Event()
-        self._state = threading.Event()
-        self._thread = threading.Thread(target=self.__loop_database_calls, args=(self._event,))
-        self._func_calls = queue.Queue()
-        self._data_response = {}
-
-        self._state.set()
-        if new:
-            self.new()
-
-    def open(self):
-        """Open Database Connection"""
-        if not self._event.is_set():
-            self._event.set()
-            self._state.wait()
-            self._thread = threading.Thread(target=self.__loop_database_calls, args=(self._event, self._state))
-            self._thread.start()
-            while self._state.is_set():
-                pass
-
-    def close(self):
-        """Close Database File"""
-        self._event.clear()
-
-    def __loop_database_calls(self, db_event: threading.Event, cl_event: threading.Event):
-        try:
-            super().open()
-            try:
-                self.load()
-            except TypeError:    pass
-            cl_event.clear()
-            while db_event.is_set():
-                try:
-                    event, func, args, kwargs = self._func_calls.get_nowait()
-                except queue.Empty:    continue
-                try:
-                    self._data_response[event] = func(*args, **kwargs)
-                except Exception as e:
-                    self._data_response[event] = e
-                event.set()
-                self._func_calls.task_done()
-                for e in list(self._data_response.keys()):
-                    if not e.is_set():
-                        del self._data_response[e]
-        except Exception as e:
-            try:
-                while True:
-                    event, f, a, k = self._func_calls.get_nowait()
-                    self._data_response[event] = e
-                    event.set()
-            except queue.Empty: pass
-        finally:
-            super().close()
-            cl_event.set()
-            try:
-                while True:
-                    event, f, a, k = self._func_calls.get_nowait()
-                    self._data_response[event] = None
-                    event.set()
-            except queue.Empty: pass
-
-    def __func_call(self, func, *args, **kwargs):
-        event = queue.threading.Event()
-        self._func_calls.put((event, func, args, kwargs))
-        event.wait()
-        res = self._data_response[event]
-        if isinstance(res, Exception):
-            raise res
-        event.clear()
-        return res
-
+    #---DB Calls Only Accessable through default Cursor---#
     def new(self):
-        """Create new/overwrite DB file"""
-        super().open()
-        super().new()
-        super().close()
+        if not self.connection():
+            open(self.filename, "w").close()
+        else:
+            raise ValueError("Connection Must not be Closed")
 
-    def exec(self, stmt: str, params: tuple=None):
-        """Execute Raw SQL Statements"""
-        return self.__func_call(super().exec, stmt, params=params)
+    def table(self, name: str, *columns: Tuple[Column, ...]) -> Table:
+        try:
+            return self[name]
+        except KeyError:
+            return self.__connection.cursor().create_table(self.__tables, name, *columns)
 
-    def table(self, name: str, *columns: Column) -> Table:
-        """Create a New Table"""
-        return self.__func_call(super().table, name, *columns)
+class DBInterfaceAsync(DBInterface):
 
-    def insert(self, table: Table, *values, columns: dict={}, id=False):
-        """Insert a Row into Table
+    # def __init__(self, *args):
+    #     super().__init__(*args)
 
-        columns: dict[Column, str, int] = value
-        """
-        return self.__func_call(super().insert, table, *values, columns=columns, id=id)
-
-    def select(self, table: Table, *conditions: Condition, columns:tuple=("*",), all=True):
-        """Select Columns from Table Where Conditions are Met"""
-        return self.__func_call(super().select, table, *conditions, columns=columns, all=all)
-
-    def selectID(self, table: Table, *conditions: Condition, all=False):
-        """Select ID from Table Where Conditions are Met"""
-        return self.__func_call(super().selectID, table, *conditions, all=all)
-
-class AsyncDatabase(Database):
-
-    def __init__(self, filepath: str, new: bool=False):
-        super().__init__(filepath)
-        self.__event = asyncio.Event()
-        self.__event.set()
-        self.__queue = asyncio.Queue()
-        self.__response = {}
-        self.__new = new
-
-    def __await__(self):
-        return self.__queue.join().__await__()
-
+    @debug.catch
     async def __func_call(self, func, *args, **kwargs):
         event = asyncio.Event()
-        self.__queue.put_nowait((event, func, args, kwargs))
+        self._db._queue.put_nowait((event, func, args, kwargs))
         await event.wait()
-        res = self.__response[event]
-        if isinstance(res, Exception):
-            raise res
+        response = self._db._queue_response[event]
+        if isinstance(response, Exception):
+            raise response
         event.clear()
-        return res
+        return response
+        # self._db._queue.task_done()
+
+    async def exec(self, stmt: str, params: Sequence[Any]=()):
+        """Execute Raw SQL Statement"""
+        return await self.__func_call(super().exec, stmt, params)
+    async def insert(self, tbl: Table, *values: Tuple[Any, ...], cols: Mapping[Union[Column, str, int], Any]={}) -> int:
+        return await self.__func_call(super().insert, tbl, *values, cols=cols)
+
+    @overload
+    async def select(self, tbl: Table, *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> DBInterface.fetch:
+        ...
+    @overload
+    async def select(self, tbl: Join, *conditions: Tuple[Condition, ...], cols: Sequence[Column]=()) -> DBInterface.fetch:
+        ...
+    async def select(self, tbl, *conditions, cols=()) -> DBInterface.fetch:
+        """Select"""
+        return await self.__func_call(super().select, tbl, *conditions, cols=cols)
+
+class DatabaseAsync(Database):
+
+    _get_interface = DBInterfaceAsync
+
+    def __init__(self, filename: str):
+        super().__init__(filename)
+        self._queue = asyncio.Queue()
+        self._queue_response = {}
+        self.__active = False
+
+    def connection(self) -> bool:
+        return self.__active and super().connection()
+
+    @debug.catch
+    async def __func_call(self, func, *args, **kwargs):
+        event = asyncio.Event()
+        self._queue.put_nowait((event, func, args, kwargs))
+        await event.wait()
+        response = self._queue_response[event]
+        if isinstance(response, Exception):
+            raise response
+        event.clear()
+        return response
+        # self._queue.task_done()
 
     @Interface.submit
-    async def serve(self):
-        func = await self.__queue.get()
+    async def __serve(self):
+        func = await self._queue.get()
         if func is None:
-            self.__shutdown_requests()
+            self.__shutdown()
+            self._queue.task_done()
             return True
 
         event, func, args, kwargs = func
         try:
-            self.__response[event] = func(*args, **kwargs)
+            self._queue_response[event] = func(*args, **kwargs)
         except Exception as err:
-            self.__response[event] = err
+            self._queue_response[event] = err
         event.set()
-        self.__queue.task_done()
+        self._queue.task_done()
 
-        for event in tuple(self.__response.keys()):
+        for event in tuple(self._queue_response.keys()):
             if not event.is_set():
-                del self.__response[event]
+                del self._queue_response[event]
 
-    @serve.start
-    async def __open(self):
-        super().open()
-        if self.__new:
-            self.__new = False
-            await self.new()
+    @__serve.enter
+    def __enter(self):
+        pass
 
-    @serve.final
-    async def __close(self):
-        self.__queue.put_nowait(None)
-        self.__shutdown_requests()
+    @__serve.exit
+    def __exit(self):
+        self.__active = False
+        self._queue.put_nowait(None)
+        self.__shutdown()
         super().close()
 
-    def __shutdown_requests(self):
+    def __shutdown(self):
         try:
             while True:
-                func = self.__queue.get_nowait()
+                func = self._queue.get_nowait()
+                self._queue.task_done()
                 if func is None:
                     continue
                 event, func, args, kwargs = func
-                self.__response[event] = RuntimeError()
+                self._queue_response[event] = RuntimeError()
         except asyncio.QueueEmpty:    pass
 
-    def open(self):
-        raise TypeError(f"Can not Open '{self.__class__.__name__}' directly")
+    def open(self) -> bool:
+        self.__active = True
+        if super().open():
+            Interface.schedule(self.__serve(self))
+            return True
+        return False
 
-    async def close(self):
-        self.serve.cancel()
-        await self.serve
-        self.__event.set()
+    def close(self) -> bool:
+        self._queue.put_nowait(None)
 
-    async def new(self):
-        return await self.__func_call(super().new)
-
-    async def exec(self, stmt: str, params: tuple=None):
-        """Execute Raw SQL Statements"""
-        return await self.__func_call(super().exec, stmt, params=params)
-
-    async def table(self, name: str, *columns: Column) -> Table:
-        """Create a New Table"""
-        return await self.__func_call(super().table, name, *columns)
-
-    async def insert(self, table: Table, *values, columns: dict={}, id=False):
-        """Insert a Row into Table
-
-        columns: dict[Column, str, int] = value
-        """
-        return await self.__func_call(super().insert, table, *values, columns=columns, id=id)
-
-    async def select(self, table: Table, *conditions: Condition, columns:tuple=("*",), all=True):
-        """Select Columns from Table Where Conditions are Met"""
-        return await self.__func_call(super().select, table, *conditions, columns=columns, all=all)
-
-    async def selectID(self, table: Table, *conditions: Condition, all=False):
-        """Select ID from Table Where Conditions are Met"""
-        return await self.__func_call(super().selectID, table, *conditions, all=all)
+    async def table(self, name: str, *cols: Column) -> Table:
+        return await self.__func_call(super().table, name, *cols)

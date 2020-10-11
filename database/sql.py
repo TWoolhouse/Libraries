@@ -1,27 +1,107 @@
-from database.enums import Type, OP
-from database.logic import Table, Column, Condition
+import debug
 import sqlite3
+from . import error as dberror
 import enum
+from .op import Type, OP, Join
+_Join = Join
+from typing import Any, Union, Sequence, Tuple
 
-def type_value(value):
+__all__ = ["Table", "Column", "Condition", "Join", "Serialize", "Cursor", "Connection", "connection", "Row"]
+
+def get_enum_value(value, type=enum.Enum) -> str:
+    if isinstance(value, type):
+        return value.value
+    return value
+
+def get_etype_value(value) -> str:
     if isinstance(value, type) and issubclass(value, Serialize):
         return value.__name__
-    return enum_val(value)
+    return get_enum_value(value, Type)
 
-def enum_val(value, type=enum.Enum) -> str:
-    return value.value if isinstance(value, type) else str(value)
+def fmt_name(name: str) -> str:
+    return str(name).strip().replace(" ", "").lower()
 
-def str_types(string: str) -> Type:
-    types = []
-    while string:
-        string = string.strip()
-        for t in Type:
-            ts = type_value(t)
-            pos = string.find(ts)
-            if pos != -1:
-                types.append(t)
-                string = string[:pos]+string[len(ts)+pos:]
-    return tuple(types)
+def encol(table: "Table", column) -> "Column":
+    if isinstance(column, Column):
+        return column
+    return table[column]
+
+def enstrc(table: "Table", column) -> str:
+    if isinstance(column, str):
+        return column
+    if isinstance(column, int):
+        return table[column].name
+    return column.name
+
+def enstr(column) -> str:
+    if isinstance(column, Column):
+        return column.name
+    return column
+
+class Row(sqlite3.Row):
+
+    def __repr__(self) -> str:
+        return f"({', '.join(map(str, self))})"
+
+    def items(self):
+        yield from zip(self.keys(), self)
+
+class Table:
+    def __init__(self, name: str, *columns: Tuple['Column', ...], id: int=0):
+        self.id = id
+        self.name = fmt_name(name)
+        self.columns = [Column("id", Type.AIPK), *columns]
+        for col in self.columns:
+            col.parent = self
+        self.__named_columns = {col.name: col for col in self.columns}
+
+    def __getitem__(self, key: Union[str, int]) -> "Column":
+        if isinstance(key, str):
+            return self.__named_columns[key]
+        return self.columns.__getitem__(key)
+        raise KeyError(key)
+    get = __getitem__
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}<{self.id}.{len(self.columns)}:{self.name} {self.columns}>"
+
+class Column:
+
+    def __init__(self, name: str, *types: Tuple[Type, ...], link: "Column"=None, id: int=0):
+        self.id = id
+        self.name = fmt_name(name)
+        self.types = types
+        self.link = link
+        self.parent = None
+
+    @classmethod
+    def Foreign(cls, name: str, link: "Column", *types: Tuple[Type, ...]) -> "Column":
+        if isinstance(link, Table):
+            link = link[0]
+        return cls(name, Type.INT, *types, link=link)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__ if not self.link else self.__class__.__name__+'.Foreign'}<{self.parent.id if self.parent else 0}.{self.id}:{self.name} ({' '.join(map(get_etype_value, self.types))})>"
+
+class Condition:
+    def __init__(self, value, column: Union[Column, str, int]=None, op: OP=OP.EQ):
+        self.value = value
+        self.column = column
+        self.op = op
+
+    def __repr__(self) -> str:
+        return f"Condition<{self.column} {self.op} {self.value}>"
+
+class Join:
+
+    Type = _Join
+
+    def __init__(self, first: Union[Column, Table], second: Column, jtype: Join=Join.INNER):
+        self.first = first if isinstance(first, Column) else first[0]
+        self.second = second if isinstance(second, Column) else second[0]
+        self.jtype = jtype
+
+    def __getitem__(self, key: str):
+        raise TypeError("Must use Column when using Join")
 
 class _MetaSerialize(type):
     def __init__(cls, name, bases, attr):
@@ -31,129 +111,199 @@ class _MetaSerialize(type):
 
 class Serialize(metaclass=_MetaSerialize):
     def serial_sql(self) -> bytes:
-        raise TypeError("Must SubClass Serialize")
-    def serial_pyc(data) -> "Serialize":
-        raise TypeError("Must Subclass Serialize")
+        raise dberror.Serialize(self, "Must SubClass 'Serialize'")
+    def serial_pyc(cls, data: bytes) -> "Serialize":
+        raise dberror.Serialize(cls, "Must SubClass 'Serialize'")
 
-class Sql:
-    """Sql file management"""
+class Cursor:
 
-    def __init__(self, filepath: str):
-        self.filepath = filepath
-        self._file = None
-        self.cursor = None
-        self.tables = {}
+    def __init__(self, cursor: sqlite3.Cursor):
+        self.__cursor = cursor
 
-    def table(self, table: str, *columns: Column) -> Table:
-        """Create a new Table"""
-        self.create_table(table, Column("id", Type.AIPK), *columns)
-        tid = self.insert("__metadata__", ("name", table), ("columns", len(columns)), id=True)
-        for index, column in enumerate(columns):
-            link = ("lid", column.link._id) if column.link else ("lid", 0)
-            column._id = self.insert("__columndata__", ("tid", tid), ("loc", index), ("name", column.name), ("type", " ".join(map(type_value, column.types))), link, id=True)
-        tbl = Table(table, *columns, id=tid)
-        self.tables[tbl.name] = tbl
-        return tbl
+    def __repr__(self) -> str:
+        return f"Cursor<{self.__cursor.connection.__repr__(self)}>"
 
-    def insert(self, table: str, *columns: tuple, id=False) -> int:
-        """Insert Row into Table"""
-        self.s_insert(table, *zip(*columns))
-        if id:
-            return self.selectID(table, *map(Condition, *zip(*columns)))
+    @debug.log
+    def fetch(self, amount: int=1) -> [Row,]:
+        """Fetch Rows From Last Selection
+        Amount: 0 is All"""
+        if not amount:
+            return self.__cursor.fetchall()
+        if amount == 1:
+            return self.__cursor.fetchone()
+        else:
+            return self.__cursor.fetchmany(amount)
 
-    def selectID(self, table: str, *conditions: Condition, all=False) -> int:
-        """Return ID of Row"""
-        res = self.select(table, *conditions, columns=("id",), all=all)
-        return ((r[0] for r in res) if all else res[0]) if res else False
+    def select(self, table: Table, *conditions: Tuple[Condition, ...], columns: Column=()) -> fetch:
+        if isinstance(table, Join):
+            name = f"{table.first.parent.name} {table.jtype.value} JOIN {table.second.parent.name} ON {table.first.parent.name}.{table.first.name}={table.second.parent.name}.{table.second.name}"
+            params, condition = self.__select_join(table, conditions)
+            columns = map(lambda x: f"{x.parent.name}.{x.name}", columns)
+        else:
+            name = table.name
+            params, condition = self.__select_std(table, conditions)
+            columns = map(lambda x: enstrc(table, x), columns)
+        self._s_select(name, params, columns, condition)
+        return self.fetch
 
-    def select(self, table: str, *conditions: Condition, columns:tuple=("*",), all=True) -> tuple:
-        """Return Columns if Condition is Met"""
-        params, cond, prev = [], "", True
+    def __select_join(self, table: Table, conditions: (Condition,)) -> (list, str):
+        params = []
+        condition = ""
+        prev_op = False
         for c in conditions:
-            if isinstance(c, Condition):
-                params.append(c.value)
-                if not prev:
-                    cond += " {} ".format(enum_val(OP.AND))
-                cond += " {} {} ?".format(c.name, enum_val(c.operator))
-                prev = False
+            if isinstance(c, OP):
+                prev_op = False
+                condition += f" {get_enum_value(c)} "
             else:
-                cond += " {} ".format(enum_val(c))
-        res = self.s_select(table, params, cond if cond else None, columns, all=all)
-        return res if res else False
+                if prev_op:
+                    condition += f" {get_enum_value(OP.AND)} "
+                condition += f"{c.column.parent.name}.{c.column.name} {get_enum_value(c.op)} ?"
+                params.append(c.value)
+                prev_op = True
+        return params, condition
 
-    def create_table(self, name: str, *columns: Column):
-        cols = ("{} {}".format(col.name, " ".join(map(type_value, col.types))) for col in columns)
-        foreign = ("FOREIGN KEY ({}) REFERENCES {}(id)".format(col.name, col.link.name) for col in columns if col.link is not None)
-        return self.s_table(name, *cols, *foreign)
+    def __select_std(self, table: Table, conditions: (Condition,)) -> (list, str):
+        if conditions and isinstance(conditions[0], int):
+            return (conditions[0],), "id IS ?"
+        params = []
+        condition = ""
+        prev_op = False
+        for i, c in enumerate(conditions, start=1):
+            if isinstance(c, OP):
+                prev_op = False
+                condition += f" {get_enum_value(c)} "
+            else:
+                if prev_op:
+                    condition += f" {get_enum_value(OP.AND)} "
+                if c.column is None:
+                    c.column = i
+                condition += f"{enstrc(table, c.column)} {get_enum_value(c.op)} ?"
+                params.append(c.value)
+                prev_op = True
+        return params, condition
 
-    def get_table(self, name: str):
-        if name in self.tables:
-            return self.tables[name]
-        return self._get_table(self.select("__metadata__", Condition("name", name), all=False))
-    def get_tableID(self, id: int) -> Table:
-        for table in self.tables.values():
-            if table._id == id:
-                return table
-        return self._get_table(self.select("__metadata__", Condition("id", id), all=False))
-    def _get_table(self, data) -> Table:
-        table = Table(data[1], *self.get_column(data[0]), id=data[0])
-        self.tables[data[1]] = table
-        return table
+    def insert(self, table: Table, *values: Any, cols: dict={}) -> int:
+        return self._s_insert_into(table.name, *zip(*((enstrc(table, col), val) for col, val in (*zip(table.columns[1:], values), *cols.items()))))
 
-    def get_column(self, tid: int, name: str=None) -> Column:
-        if name is None:
-            return (self._get_column(col) for col in self.select("__columndata__", Condition("tid", tid)))
-        return self._get_column(self.select("__columndata__", Condition("tid", tid), Condition("name", name), all=False))
-    def get_columnID(self, id: int) -> Column:
-        return self._get_column(self.select("__columndata__", Condition("id", id), all=False))
-    def _get_column(self, data) -> Column:
-        return Column(data[3], *str_types(data[4]), link=self.get_tableID(data[5]) if data[5] else None, id=data[0])
+    def create_table(self, tables: dict, name: str, *columns: Column) -> Table:
+        fname = fmt_name(name)
+        ct = (f"{col.name} {' '.join(map(get_etype_value, col.types))}" for col in columns)
+        fc = (f"FOREIGN KEY ({col.name}) REFERENCES {col.link.parent.name}({col.link.name})" for col in columns if col.link is not None)
+        self._s_create_table(fname, f"id {Type.AIPK.value}", *ct, *fc)
+        tid = self._s_insert_into("__metadata__", ("name",), (fname,))
+        for index, col in enumerate(columns, start=1):
+            col.id = self._s_insert_into("__columndata__", ("tid", "idx", "name", "type", "lid"), (tid, index, col.name, ",".join(map(get_etype_value, col.types)), col.link.id if col.link else None))
+        # tbl = Table(name, *columns, id=tid)
+        return self.__load_table(tables, tid, fname)
 
-    def exec(self, stmt: str, params=None):
-        """Execute a Raw SQL Statement"""
-        try:
-            if params:
-                # print(stmt, params)
-                return self.cursor.execute(stmt, params)
-            # print(stmt)
-            return self.cursor.execute(stmt)
-        except (sqlite3.InterfaceError, sqlite3.OperationalError) as err:
-            print(stmt, params)
-            raise
-
-    def s_table(self, table: str, *columns: str):
-        """Underlying SQL Statement for creating a table"""
-        return self.exec("CREATE TABLE {} ({})".format(table, ", ".join(columns)))
-
-    def s_insert(self, table: str, columns: tuple, parameters: tuple):
-        """Underlying SQL Statement for inserting a row"""
-        return self.exec("INSERT INTO {} {} VALUES ({})".format(table, ("("+(", ".join(columns))+")" if columns else ""), ", ".join(("?" for i in range(len(parameters))))), parameters)
-
-    def s_select(self, table: str, parameters: tuple, conditional:str=None, cols:tuple=("*",), all=True) -> tuple:
-        """Underlying SQL Statement for selecting rows"""
-        self.exec("SELECT {} FROM {}{}".format(", ".join(cols), table, "" if conditional is None else " WHERE {}".format(conditional)), parameters)
-        return self.cursor.fetchall() if all else self.cursor.fetchone()
-
-    def new(self):
-        """Create a new Database File with Setup"""
-        self.create_table("__metadata__", Column("id", Type.AIPK), Column("name", Type.String), Column("columns", Type.Integer))
-        self.create_table("__columndata__", Column("id", Type.AIPK), Column.Foreign("tid", Table("__metadata__")), Column("loc", Type.Integer), Column("name", Type.String), Column("type", Type.String), Column.Foreign("lid", Table("__metadata__")))
+    @debug.call
+    def create_new(self):
+        self._s_create_table("__metadata__", f"id {Type.AIPK.value}", f"name {Type.STR.value}")
+        # meta = self.create_table("__metadata__", Column("id", Type.AIPK), Column("name", Type.STR))
+        self._s_create_table("__columndata__", f"id {Type.AIPK.value}", f"tid {Type.INT.value}", f"idx {Type.INT.value}", f"name {Type.STR.value}", f"type {Type.STR.value}", f"lid {Type.INT.value}", f"FOREIGN KEY (tid) REFERENCES __metadata__(id)", f"FOREIGN KEY (lid) REFERENCES __columndata__(id)")
+        # self.create_table("__columndata__", Column("id", Type.AIPK), Column.Foreign("tid", meta[0]), Column("idx", Type.INT), Column("name", Type.STR), Column("type", Type.STR), Column.Foreign("lid", Table("__columndata__")))
         self.exec("VACUUM")
 
-    def new_file(self):
-        open(self.filepath, "w").close()
+    @debug.log
+    @debug.catch
+    def exec(self, stmt: str, params: tuple=()):
+        """Execute Raw SQL Statement"""
+        self.__cursor.execute(stmt, params)
+        return self
 
-    def open(self):
-        """Opens file"""
-        self._file = sqlite3.connect(self.filepath, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
-        self.cursor = self._file.cursor()
+    def _s_select(self, table: str, params: tuple, columns: (str,)=("*",), condition: str=None):
+        self.exec(f"SELECT {c if (c := ', '.join(columns)) else '*'} FROM {table} {f'WHERE {condition}' if condition else ''}", params)
+
+    def _s_insert_into(self, table: str, columns: (str,), values: tuple) -> int:
+        self.exec(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({('?,'*len(values))[:-1]})", values)
+        return self.__cursor.lastrowid
+
+    def _s_create_table(self, name: str, *columns: str):
+        self.exec(f"CREATE TABLE {name} ({', '.join(columns)})")
+
     def close(self):
-        """Closes file"""
-        self.cursor.close()
-        self._file.commit()
-        self._file.close()
+        try:
+            self.__cursor.close()
+        except sqlite3.ProgrammingError:
+            pass
 
-    def __enter__(self):
-        self.open()
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
+    def load(self, tables: dict) -> dict:
+        try:
+            self._s_select("__metadata__", ())
+        except sqlite3.OperationalError:
+            self.create_new()
+            return tables
+        for tbl in self.fetch(0):
+            self.__load_table(tables, *tbl)
+        return tables
+
+    def __load_table(self, tables: dict, tid: int, name: str) -> Table:
+        if name in tables:
+            return tables[name]
+        tbl = tables[name] = {0: Column(tid)}
+        self._s_select("__columndata__", (tid,), condition="tid IS ?")
+        for col in self.fetch(0):
+            self.__load_column(tables, col)
+        cols = [tbl[i] for i in sorted(tbl.keys())][1:]
+        tbl = tables[name] = Table(name, *cols, id=tid)
+        return tbl
+
+    def __load_column(self, tables: dict, col: (int, dict)) -> Column:
+        if isinstance(col, int):
+            self._s_select("__columndata__", (col,), condition="id IS ?")
+            return self.__load_column(tables, self.fetch())
+        for c in (clm for tbl in tables.values() for clm in (tbl.values() if isinstance(tbl, dict) else tbl.columns)):
+            if c.id == col["id"]:
+                return c
+        table = str(col["tid"])
+        for tbl in tables.values():
+            if tbl[0].name == table:
+                table = tbl
+                break
+
+        column = table[col["idx"]] = Column(col["name"], *col["type"].split(","), link=self.__load_column(columns, col["lid"]) if col["lid"] else None, id=col["id"])
+        return column
+
+class Connection(sqlite3.Connection):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.filename = args[0]
+        self.row_factory = Row
+        self.__cursors = {}
+        self.cursor()
+        self.__open = True
+
+    def cursor(self, name: str="default") -> Cursor:
+        try:
+            return self.__cursors[name]
+        except KeyError:
+            c = self.__cursors[name] = Cursor(super().cursor())
+            return c
+
+    def close(self):
+        self.__open = False
+        for cursor in self.__cursors.values():
+            cursor.close()
+        self.commit()
+        super().close()
+
+    def close_cursor(self, name: str):
+        self.__cursors.pop(name).close()
+
+    def new(self):
+        self.cursor().create_new()
+
+    def __bool__(self) -> bool:
+        return self.__open
+
+    def __repr__(self, cursor=None) -> str:
+        if cursor:
+            for k,c in self.__cursors.items():
+                if c is cursor:
+                    return k
+            return None
+        return super().__repr__()
+
+def connection(filename: str) -> Connection:
+    return sqlite3.connect(filename, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES, check_same_thread=debug.flag, factory=Connection)
