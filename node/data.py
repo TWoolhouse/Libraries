@@ -17,7 +17,7 @@ class Tag:
         return self.tag.__hash__()
 
     def __repr__(self) -> str:
-        return f"T{self.tag}"
+        return f"T{self.tag}" if self.tag else ""
 
 class Data:
     """Packet to Send over Network"""
@@ -35,7 +35,7 @@ class Data:
                 self.head.append(prefix)
 
     def __repr__(self) -> str:
-        return "{}<[{}] ({}) : {}>".format(self.__class__.__name__, "-".join(self.prefixes), ",".join(self.tags), self.data)
+        return "{}<[{}] ({}) : {}>".format(self.__class__.__name__, "-".join(self.head), ",".join(map(str, self.tag)), self.data)
 
     def __hash__(self) -> int:
         return id(self)

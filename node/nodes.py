@@ -1,7 +1,7 @@
 import asyncio
 from interface import Interface
 from .data import Data, Tag
-from typing import Union, Type
+from typing import Union, Type, Tuple
 from collections import defaultdict
 
 __all__ = ["Server", "Client"]
@@ -10,20 +10,24 @@ class Node:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self.__open = True
         self.__reader, self.__writer = reader, writer
-        self.__read_loop = Interface.schedule(self.__read_loop())
+        self.__read_loop = self.__read_loop(self)
         self.__read = defaultdict(set)
 
     def __bool__(self) -> bool:
         return self.__open
 
-    @Interface.submit
+    @Interface.Repeat
     async def __read_loop(self):
-        data = await self.__reader.readuntil(b"<#>")
+        try:
+            data = await self.__reader.readuntil(b"<#>")
+        except asyncio.exceptions.IncompleteReadError as e:
+            return True
         if data:
-            Interface.schedule(self.__process_data(data))
+            Interface.schedule(self.__process_data(data[:-3]))
 
     @__read_loop.exit
     async def close(self):
+        # print("Close:", self)
         self.__open = False
         self.__read_loop.cancel()
         self.__writer.close()
@@ -37,16 +41,20 @@ class Node:
             payload = payload.decode("utf8")
         data = Data(payload, *head, *map(Tag, tag))
         for pre in (*data.head, *data.tag):
-            self._read[pre].add(data)
+            self.__read[pre].add(data)
 
     async def _write(self, data: Data):
         head = "|".join(data.head).encode("utf8")
-        tag = "|".join(data.tag).encode("utf8")
+        tag = "|".join(map(str, data.tag)).encode("utf8")
         payload = data.data if isinstance(data.data, bytes) else data.data.encode("utf8")
-        self.__writer.write(head+b"<|>"+tag+b"<|>"+payload)
-        await self.__writer.drain()
+        self.__writer.write(head+b"<|>"+tag+b"<|>"+payload+b"<#>")
+        try:
+            await self.__writer.drain()
+        except ConnectionError:
+            await self.close()
+        return True
 
-    async def _read(self, *prefix: Union[str, Tag]) -> [Data]:
+    def _read(self, *prefix: Union[str, Tag]) -> Tuple[Data]:
         match = []
         for packet in self.__read[prefix[0]]:
             if all(pre in (*packet.head, *packet.tag) for pre in prefix[1:]):
@@ -58,19 +66,21 @@ class Node:
 
 class DataInterface:
 
-    def send(self, data: Union[Data, str, bytes], *head: Union[str, bytes, Tag]) -> bool:
+    def send(self, data: Union[Data, str, bytes], *head: Union[str, bytes, Tag]) -> asyncio.Future:
         if not isinstance(data, Data):
             data = Data(data, *head)
-        Interface.schedule(self._node._write(data))
+        return Interface.schedule(self._node._write(data))
 
-    async def recv(self, wait: bool, *prefix: Union[str, Tag]) -> [Data]:
+    async def recv(self, wait: bool, *prefix: Union[str, Tag]) -> Tuple[Data]:
         match = []
+        match.extend(self._node._read(*prefix))
         while len(match) < wait:
-            match.extend(await self._node._read(*prefix))
-        match.extend(await self._node._read(*prefix))
+            await Interface.next()
+            match.extend(self._node._read(*prefix))
+        return match
 
 class Client(DataInterface):
-    def __init__(self, addr: str, port: int, *dispatch: Dispatcher):
+    def __init__(self, addr: str, port: int, *dispatch: 'Dispatcher'):
         self.addr, self.port = addr, port
         self.dispatchers = {}
         self._node = None
@@ -83,22 +93,36 @@ class Client(DataInterface):
         await self._node.close()
         return True
 
-    async def __aenter__(self):
+    def __enter__(self) -> 'Client':
+        raise NotImplementedError
+        return self
+
+    async def __aenter__(self) -> 'Client':
         await self.open()
         return self
     def __aexit__(self, *args):
         return self.close()
 
 class SClient(DataInterface):
+
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self._node = Node(reader, writer)
+        self.init()
+        if self.anit is not self.__anit:
+            Interface.schedule(self.anit())
+
+    def init(self):
+        pass
+    async def __anit(self):
+        pass
+    anit = __anit
 
     async def close(self):
         await self._node.close()
 
 class Server:
 
-    def __init__(self, addr: str, port: int, *dispatch: Dispatcher, limit: int=100, encrypt=False, client: Type[SClient]=SClient):
+    def __init__(self, addr: str, port: int, *dispatch: 'Dispatcher', limit: int=100, encrypt=False, client: Type[SClient]=SClient):
         self.addr, self.port = addr, port
         self.limit = limit
         self.client = client
@@ -113,7 +137,9 @@ class Server:
 
     async def __create_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         addr = writer.get_extra_info("peername")
-        x = self.client(reader, writer)
+        c = self.client(reader, writer)
+        self.__connections[addr[1]] = c
+        # print("Connection:", c)
 
     def close(self, all=False):
         self.__server.close()
