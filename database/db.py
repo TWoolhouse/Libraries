@@ -176,15 +176,9 @@ class DatabaseAsync(Database):
         return response
         # self._queue.task_done()
 
-    @Interface.submit
+    @Interface.Repeat
     async def __serve(self):
-        func = await self._queue.get()
-        if func is None:
-            self.__shutdown()
-            self._queue.task_done()
-            return True
-
-        event, func, args, kwargs = func
+        event, func, args, kwargs = await self._queue.get()
         try:
             self._queue_response[event] = func(*args, **kwargs)
         except Exception as err:
@@ -202,8 +196,8 @@ class DatabaseAsync(Database):
 
     @__serve.exit
     def __exit(self):
+        self.__serve_loop.cancel()
         self.__active = False
-        self._queue.put_nowait(None)
         self.__shutdown()
         super().close()
 
@@ -221,7 +215,7 @@ class DatabaseAsync(Database):
     def open(self) -> bool:
         self.__active = True
         if super().open():
-            Interface.schedule(self.__serve(self))
+            self.__serve_loop = self.__serve(self)
             return True
         return False
 
