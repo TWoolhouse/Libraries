@@ -1,6 +1,6 @@
 from . import error
 from .op import Type, OP
-from .sql import Table, Column, Condition, Join, Serialize, connection
+from .sql import Table, Column, Condition, Join, Serialize
 from .db import Database, DatabaseAsync
 op, tp = OP, Type
 
