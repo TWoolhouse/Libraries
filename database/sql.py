@@ -263,7 +263,7 @@ class Cursor:
                 table = tbl
                 break
 
-        column = table[col["idx"]] = Column(col["name"], *col["type"].split(","), link=self.__load_column(columns, col["lid"]) if col["lid"] else None, id=col["id"])
+        column = table[col["idx"]] = Column(col["name"], *col["type"].split(","), link=self.__load_column(tables, col["lid"]) if col["lid"] else None, id=col["id"])
         return column
 
 class Connection(sqlite3.Connection):
