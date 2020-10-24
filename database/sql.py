@@ -74,7 +74,7 @@ class Column:
         self.parent = None
 
     @classmethod
-    def Foreign(cls, name: str, link: "Column", delete=None, update=None, *types: Tuple[Type, ...]) -> "Column":
+    def Foreign(cls, name: str, link: "Column", delete="CASCADE", update="CASCADE", *types: Tuple[Type, ...]) -> "Column":
         if isinstance(link, Table):
             link = link[0]
         col = cls(name, Type.INT, *types, link=link)
@@ -247,7 +247,7 @@ class Cursor:
         for col in self.fetch(0):
             self.__load_column(tables, col)
         cols = [tbl[i] for i in sorted(tbl.keys())][1:]
-        tbl = tables[name] = Table(name, *cols, id=tid)
+        tbl = tables[tid] = tables[name] = Table(name, *cols, id=tid)
         return tbl
 
     def __load_column(self, tables: dict, col: (int, dict)) -> Column:
