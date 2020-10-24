@@ -1,5 +1,5 @@
 import debug
-from typing import Any, Sequence, Tuple, Mapping, Union, overload
+from typing import Any, Sequence, Tuple, Mapping, Union, overload, Callable, Iterable
 from .sql import *
 from .sql import fmt_name
 import asyncio
@@ -24,18 +24,18 @@ class DBInterface:
         # raise RuntimeError("Function Should have been Overriden")
     def insert(self, tbl: Table, *vals: Tuple[Any, ...], cols: Mapping[Union[Column, str, int], Any]={}) -> int:
         return self.__c.insert(tbl, *vals, cols=cols)
-    def fetch(self, amount: int=1) -> [Row,]:
+    def fetch(self, amount: int=1) -> Iterable[Row]:
         """Fetch Rows From Last Selection
         Amount: 0 is All"""
         return self.__c.fetch(amount)
     
     @overload
-    def select(self, tbl: Table, *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> fetch:
+    def select(self, tbl: Table, *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> Callable[[int], Iterable[Row]]:
         ...
     @overload
-    def select(self, tbl: Join, *conditions: Tuple[Condition, ...], cols: Sequence[Column]=()) -> fetch:
+    def select(self, tbl: Join, *conditions: Tuple[Condition, ...], cols: Sequence[Column]=()) -> Callable[[int], Iterable[Row]]:
         ...
-    def select(self, tbl, *conditions, cols=()) -> fetch:
+    def select(self, tbl, *conditions, cols=()) -> Callable[[int], Iterable[Row]]:
         """Select"""
         return self.__c.select(tbl, *conditions, columns=cols)
 
@@ -94,7 +94,9 @@ class Database:
 
     interface = __call__
 
-    def __getitem__(self, name: str) -> Table:
+    def __getitem__(self, name: Union[str, int]) -> Table:
+        if isinstance(name, int):
+            return self.__tables[name]
         return self.__tables[fmt_name(name)]
 
     def __enter__(self):
@@ -142,12 +144,12 @@ class DBInterfaceAsync(DBInterface):
         return await self.__func_call(super().insert, tbl, *values, cols=cols)
 
     @overload
-    async def select(self, tbl: Table, *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> DBInterface.fetch:
+    async def select(self, tbl: Table, *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> Callable[[int], Iterable[Row]]:
         ...
     @overload
-    async def select(self, tbl: Join, *conditions: Tuple[Condition, ...], cols: Sequence[Column]=()) -> DBInterface.fetch:
+    async def select(self, tbl: Join, *conditions: Tuple[Condition, ...], cols: Sequence[Column]=()) -> Callable[[int], Iterable[Row]]:
         ...
-    async def select(self, tbl, *conditions, cols=()) -> DBInterface.fetch:
+    async def select(self, tbl, *conditions, cols=()) -> Callable[[int], Iterable[Row]]:
         """Select"""
         return await self.__func_call(super().select, tbl, *conditions, cols=cols)
 
