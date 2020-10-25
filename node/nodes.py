@@ -1,7 +1,7 @@
 import asyncio
 from interface import Interface
 from .data import Data, Tag
-from typing import Union, Type, Tuple
+from typing import Union, Type, Tuple, Callable, Any
 from collections import defaultdict
 
 __all__ = ["Server", "Client"]
@@ -54,7 +54,7 @@ class Node:
             await self.close()
         return True
 
-    def _read(self, *prefix: Union[str, Tag]) -> Tuple[Data]:
+    async def _read(self, *prefix: Union[str, Tag]) -> Tuple[Data]:
         match = []
         for packet in self.__read[prefix[0]]:
             if all(pre in (*packet.head, *packet.tag) for pre in prefix[1:]):
@@ -65,6 +65,9 @@ class Node:
         return match
 
 class DataInterface:
+
+    def __init__(self, dispatchers: dict[str, Callable[[DataInterface, Data], Any]]):
+        self.dispatchers = dispatchers
 
     def send(self, data: Union[Data, str, bytes], *head: Union[str, bytes, Tag]) -> asyncio.Future:
         if not isinstance(data, Data):
@@ -79,18 +82,21 @@ class DataInterface:
             match.extend(self._node._read(*prefix))
         return match
 
+    async def close(self) -> bool:
+        await self._node.close()
+        return True
+
+Dispatch = Callable[[DataInterface, Data], Any]
+
 class Client(DataInterface):
-    def __init__(self, addr: str, port: int, *dispatch: 'Dispatcher'):
+    def __init__(self, addr: str, port: int, **dispatch: Dispatch):
+        super().__init__(dispatch)
         self.addr, self.port = addr, port
-        self.dispatchers = {}
         self._node = None
 
     async def open(self) -> bool:
         if not self._node:
             self._node = Node(*await asyncio.open_connection(self.addr, self.port))
-        return True
-    async def close(self) -> bool:
-        await self._node.close()
         return True
 
     def __enter__(self) -> 'Client':
@@ -105,11 +111,15 @@ class Client(DataInterface):
 
 class SClient(DataInterface):
 
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, dispatchers: dict[str, Dispatch]):
+        super().__init__(dispatchers)
         self._node = Node(reader, writer)
         self.init()
         if self.anit is not self.__anit:
-            Interface.schedule(self.anit())
+            self.__init = Interface.schedule(self.anit())
+        else:
+            self.__init = Interface.loop.create_future()
+            self.__init.set_result(True)
 
     def init(self):
         pass
@@ -117,16 +127,13 @@ class SClient(DataInterface):
         pass
     anit = __anit
 
-    async def close(self):
-        await self._node.close()
-
 class Server:
 
-    def __init__(self, addr: str, port: int, *dispatch: 'Dispatcher', limit: int=100, encrypt=False, client: Type[SClient]=SClient):
+    def __init__(self, addr: str, port: int, limit: int=100, encrypt=False, client: Type[SClient]=SClient, **dispatch: Dispatch):
         self.addr, self.port = addr, port
         self.limit = limit
         self.client = client
-        self.dispatchers = {}
+        self.dispatchers = dispatch
         self.__server = None
         self.__connections = {}
 
@@ -137,7 +144,7 @@ class Server:
 
     async def __create_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         addr = writer.get_extra_info("peername")
-        c = self.client(reader, writer)
+        c = self.client(reader, writer, self.dispatchers)
         self.__connections[addr[1]] = c
         # print("Connection:", c)
 
