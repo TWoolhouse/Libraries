@@ -1,4 +1,3 @@
-import debug
 import asyncio
 import concurrent.futures
 import functools
@@ -32,10 +31,11 @@ class Batch:
 class Interface:
 
     def __init__(self):
-        self.__executor_io = concurrent.futures.ThreadPoolExecutor()
+        self.__executor_io = concurrent.futures.ThreadPoolExecutor(thread_name_prefix=f"{self}-Thread")
         self.__executor_cpu = concurrent.futures.ProcessPoolExecutor()
         self.__loop = asyncio.get_event_loop()
         self.__loop.set_debug(False) # Debug
+        self.__loop.set_default_executor(self.__executor_io)
         self.__active = asyncio.Event()
         self.__active.set()
 
@@ -61,6 +61,7 @@ class Interface:
         finally:
             self.__active.set()
             self.__loop.run_until_complete(self.terminate.finish())
+            self.__loop.run_until_complete(self.next())
             self.__loop.run_until_complete(self.__loop.shutdown_asyncgens())
             self.__loop.stop()
             self.__loop.close()
@@ -104,8 +105,8 @@ class Interface:
     async def wait(self, *coro: Union[Coroutine, asyncio.Future]) -> list:
         return (await asyncio.wait(coro))[0]
 
-    async def next(self):
-        await asyncio.sleep(0)
+    async def next(self, time: float=0):
+        await asyncio.sleep(time)
 
     def single(*_):
         return mp.current_process().name == "MainProcess"
@@ -126,6 +127,7 @@ class Interface:
             setattr(self, "__call__", _func)
 
             self.__enter__ = self.__exit__ = None
+            self.delay = 0
 
         def enter(self, func):
             self.__enter__ = func
@@ -161,7 +163,7 @@ class Interface:
                         result = False
                         self.__done.clear()
                         while self.__event and not result and Interface.active():
-                            await Interface.next()
+                            await Interface.next(self.__parent.delay)
                             result = await self.__parent.__call__(*self.__params[0], **self.__params[1])
                     except Exception as e:
                         print(f"{self.__parent.__class__.__name__} Error: {self.__parent.__call__}", "".join(traceback.format_exception(e, e, e.__traceback__)))
@@ -184,6 +186,9 @@ class Interface:
         def __init__(self, file: Union[str, bytes, int], *args, **kwargs):
             self.__file = None
             self.__args = (file, args, kwargs)
+
+        def __await__(self):
+            return self.__aenter__().__await__()
 
         async def __aenter__(self) -> IO:
             self.__file = await Interface.process(open, self.__args[0], *self.__args[1], **self.__args[2])
