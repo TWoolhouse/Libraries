@@ -133,7 +133,7 @@ class Vector(object):
         """Multiplies each component with the corrosponding component of other"""
         return self.__class__(*(self[i] * other[i] for i in range(len(self))))
 
-    def contrain(self, s1: "Vector", e1: "Vector", s2: "Vector", e2: "Vector") -> "Vector":
+    def constrain(self, s1: "Vector", e1: "Vector", s2: "Vector", e2: "Vector") -> "Vector":
         """Resizes the Vector to be scaled within the args"""
         if all(map(lambda x: isinstance(x, self.__class__) and len(x) == len(self), (s1, e1, s2, e2))):
             return self.__class__(*( ((self[i] - s1[i]) / (e1[i] - s1[i])) * (e2[i] - s2[i]) + s2[i] for i in range(len(self)) ))
