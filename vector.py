@@ -36,6 +36,12 @@ class Vector(object):
     def round(self, ndigits=None) -> "Vector":
         return self.__class__(*(round(i, ndigits) for i in self))
 
+    # Serialisation
+    def __getstate__(self) -> tuple:
+        return self.values
+    def __setstate__(self, state: tuple):
+        self.values = state
+
     def __getitem__(self, key): #allows indexing
         return self.values[key]
 
