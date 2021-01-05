@@ -52,7 +52,7 @@ class File(Buffer):
     @cache
     async def open(filename) -> bytes:
         try:
-            async with Interface.open(filename, "rb") as file:
+            async with Interface.AIOFile(filename, "rb") as file:
                 return file.read()
         except FileNotFoundError:
             raise error.BufferRead(filename) from None
@@ -65,9 +65,11 @@ class File(Buffer):
 
 class Python(File):
 
+    _Request, _Client = None, None
+
     __re = re.compile(r"(?:<py>)((?:(?!</py>)(?:\r?\n|.))*)(?:</py>)")
 
-    def __init__(self, file: str, request: "Request", cache_disable: bool=None):
+    def __init__(self, file: str, request: "Request"=None, cache_disable: bool=None):
         super().__init__(file, cache_disable)
         self.__request = request
 
@@ -78,20 +80,25 @@ class Python(File):
     @cache
     async def open(filename) -> bytes:
         try:
-            async with Interface.open(filename, "r", encoding="utf-8") as file:
+            async with Interface.AIOFile(filename, "r", encoding="utf-8") as file:
                 return file.read()
         except FileNotFoundError:
             raise error.BufferRead(filename) from None
 
     @debug.catch
-    async def compile(self, request: object=None) -> bytes:
+    async def compile(self, request: ('Request', 'Client')=None) -> bytes:
         data = await self.open(self.file, override=self.cache_disable)
         namespace = {
             "path": PATH,
-            "request": request or self.__request,
+            "request": self.__request,
             "value": self.__wrap,
             "buffer": self.__insert_buffer,
         }
+        if isinstance(request, self._Request):
+            namespace["client"] = request.client
+            namespace["request"] = request
+        elif isinstance(request, self._Client):
+            namespace["client"] = request
         match = self.__re.search(data)
 
         output = b""

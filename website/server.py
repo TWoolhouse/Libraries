@@ -7,10 +7,11 @@ import urllib.parse
 from http import HTTPStatus as Status
 from http.cookies import SimpleCookie as Cookie
 from .buffer import Buffer
+from . import buffer
 from . import error
 from ._ssl import context as ssl_context
 import functools
-from typing import Type
+from typing import Type, Union, Callable, Any, overload
 
 import traceback
 
@@ -45,7 +46,7 @@ class Header:
     def __init__(self, name: str, *values: str, split="; "):
         self.name = name.title().replace(" ", "-")
         self.values = list(values)
-        self.split = split
+        self.split_char = split
 
     @property
     def value(self):
@@ -54,11 +55,15 @@ class Header:
     def value(self, value):
         self.values[0] = value
 
+    def split(self, split_char: str=None) -> list:
+        self.values = self.value.split(self.split_char if split_char is None else split_char)
+        return self.values
+
     def __repr__(self) -> str:
         return f"{self.name}<{', '.join(map(str, self.values))}>"
 
     def _format(self) -> str:
-        return f"{self.name.title().replace(' ', '-')}: {self.split.join(map(str, self.values))}"
+        return f"{self.name.title().replace(' ', '-')}: {self.split_char.join(map(str, self.values))}"
 
 class HeaderContainer:
 
@@ -110,20 +115,20 @@ class BufferContainer:
 
     async def _compile(self, client) -> bytes:
         final = bytes()
-        for buffer in self.__container:
-            if isinstance(buffer, Buffer):
+        for data in self.__container:
+            if isinstance(data, Buffer):
                 try:
-                    buffer = await buffer.compile()
+                    data = await (data.compile(client) if isinstance(data, buffer.Python) else data.compile())
                 except error.BufferRead:
                     client.status = Status.NOT_FOUND
                     break
-            elif isinstance(buffer, bytes):
+            elif isinstance(data, bytes):
                 pass
-            elif isinstance(buffer, str):
-                buffer = buffer.encode("utf-8")
+            elif isinstance(data, str):
+                data = data.encode("utf-8")
             else:
                 continue
-            final += buffer
+            final += data
 
         return final
 
@@ -132,10 +137,11 @@ class Client:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, server, server_addr: str, peer_addr: str, peer_port: int, ssl: bool, command: str, path: str, query: dict, request: HeaderContainer, cookies: Cookie):
         self.__reader, self._writer = reader, writer
         self.peer, self.port = peer_addr, peer_port
-        self.hostname = server_addr
-        self.server = server
-        self.ssl = ssl
-        self.command, self.path, self.query, self.request, self.cookie = command, path, query, request, cookies
+        self.hostname: str = server_addr
+        self.server: Server = server
+        self.ssl: bool = ssl
+        self.command, self.path, self.request, self.cookie = command, path, request, cookies
+        self.query: dict[str, Any] = query
         self.status = Status.OK
         self.header = HeaderContainer()
         self.buffer = BufferContainer()
@@ -146,18 +152,29 @@ class DefaultRequest:
     class __base:
         def __init__(self, client: Client, request: list, seg: int, *args, **kwargs):
             raise RuntimeError
-    class ssl(__base):
-        pass
     class redirect(__base):
         pass
+    class ssl(redirect):
+        pass
 
-class Request:
+class __MetaRequest(type):
+    def __call__(self, caller: 'Request', *args, **kwargs):
+        if isinstance(caller, Request):
+            return super().__call__(caller.client, caller.request, caller.segment + 1, *args, **kwargs)
+        return super().__call__(caller, *args, **kwargs)
+
+class Request(metaclass=__MetaRequest):
 
     default = DefaultRequest
-    def __init__(self, client: Client, request: list, seg: int, *args, **kwargs):
-        self.client = client
-        self.request = request
-        self.seg = seg
+    @overload
+    def __init__(self, caller: 'Request', *args, **kwargs): ...
+    @overload
+    def __init__(self, client: Client, request: list, segment: int, *args, **kwargs): ...
+
+    def __init__(self, client: Client, request: list, segment: int, *args, **kwargs):
+        self.client: Client = client
+        self.request: list = request
+        self.segment: int = segment
         self.init(*args, **kwargs)
 
     def __await__(self):
@@ -166,7 +183,7 @@ class Request:
     def init(self, *args, **kwargs):
         pass
 
-    async def handle(self) -> "Request":
+    async def handle(self):
         pass
 
     def secure(func):
@@ -174,7 +191,7 @@ class Request:
         async def enforce_secure(self):
             if self.client.ssl:
                 return await func(self)
-            return self.default.ssl(self.client, self.request, self.seg)
+            return self.default.ssl(self)
         return enforce_secure
 
     def redirect(path=None, query=None, hostname=None, port=None, scheme="http"):
@@ -202,6 +219,15 @@ class DefaultRequest:
 Request.default = DefaultRequest
 
 class Tree:
+
+    # class Condition:
+    #     def __init__(self, value: Any, eq: str):
+    #         self.value = value
+    #         self.eq = eq
+
+    # class Query(Condition):
+    #     pass
+
     def __init__(self, blank__: Request=error.TreeTraversal, end__=error.TreeTraversal, default__=error.TreeTraversal, **dirs):
         self.__tree = {
             "": blank__,
@@ -215,33 +241,40 @@ class Tree:
         self.end = end__
         self.default = default__
 
-    @debug.log
-    def traverse(self, request: list, segment: int, client: Client, *args, **kwargs) -> Request:
+    # def __call__(self, request: Request, *args, **kwargs):
+    #     return self.traverse(request, *args, **kwargs)
+
+    async def traverse(self, request: Request, *args, **kwargs) -> Union[Request, Buffer, Any]:
+        index = request.segment
         try:
-            req = request[segment]
-            segment += 1
-            req = self.__tree[req]
-        except IndexError as e:
-            segment += 1
+            seg = request.request[index]
+            index += 1
+            req: Union[Tree, Type[Request], Type[Exception], Buffer, Callable[..., Any], Any] = self.__tree[seg]
+        except IndexError as e: # Not in path
+            index += 1
             if issubclass(self.end, Exception):
-                raise self.end(self, request, segment) from None
+                raise self.end(self, request.request, index) from None
             req = self.end
-        except KeyError as e:
+        except KeyError as e: # Not in tree
             if issubclass(self.default, Exception):
-                raise self.default(self, request, segment, req) from None
+                raise self.default(self, request.request, index, seg) from None
             req = self.default
+
         if isinstance(req, Tree):
-            return req.traverse(request, segment, client, *args, **kwargs)
+            request.segment += 1
+            res = await req.traverse(request, *args, **kwargs)
+            request.segment -= 1
+            return res
         elif isinstance(req, type):
             if issubclass(req, Request):
-                return req(client, request, segment, *args, **kwargs)
+                return await req(request.client, request.request, index, *args, **kwargs)
             elif issubclass(req, Exception):
-                raise req(self, request, segment)
+                raise req(self, request.request, request.segment)
         elif isinstance(req, Buffer):
-            client.buffer << req
+            request.client.buffer << req
             return req
         elif callable(req):
-            return req(*args, **kwargs)
+            return req(request, *args, **kwargs)
         else:
             return req
 
@@ -302,9 +335,49 @@ class Server:
 
                 # Read body
                 if "content-length" in headers:
-                    body = (await reader.read(int(headers["content-length"].value)+1)).decode().strip()
-                    if body:
-                        query.update(map(urllib.parse.unquote, q.split("=", 1)) for q in body.split("&"))
+                    length = int(headers["content-length"].value)
+                    size = length
+                    body = b""
+                    while size > 0:
+                        data = await asyncio.wait_for(reader.read(size), 5)
+                        body += data
+                        size -= len(data)
+                    _ = len(body)
+                    if "content-type" in headers and "multipart/form-data" in headers["content-type"].value:
+                        # Multipart
+                        boundary: str = headers["content-type"].split()[1].split("=", 1)[-1]
+                        data = {}
+                        for index, segment in enumerate(body.split(f"--{boundary}".encode())):
+                            if not segment:
+                                continue
+                            try:
+                                head, content = segment.strip().split(b"\r\n\r\n", 1)
+                            except ValueError:
+                                continue
+                            _head = HeaderContainer()
+                            for line in head.strip().split(b"\r\n"):
+                                name, values = map(str.strip, line.decode().split(":", 1))
+                                _head[name] = Header(name, values)
+                            if dis := _head.get("content-disposition", None):
+                                for d in dis.split():
+                                    if d.startswith("name="):
+                                        name = d[len("name=")+1:-1]
+                                        break
+                                else:
+                                    name = f"form_{index}"
+                            else:
+                                    name = f"form_{index}"
+
+                            data[name] = {
+                                "head": _head,
+                                "data": content,
+                                }
+                        query.update(data)
+                    else:
+                        # Deal with binary values
+                        body = body.decode().strip()
+                        if body:
+                            query.update(map(urllib.parse.unquote, q.split("=", 1)) for q in body.split("&"))
 
                 # Parse Cookies
                 cookies = Cookie()
@@ -320,11 +393,7 @@ class Server:
                 client = self.client(reader, writer, self.data, headers["host"].value.split(":", 1)[0], *addr, ssl, command, path, query, headers, cookies)
                 request = self.request(client, path.split("/")[1:], 0)
 
-                # print("Request Handler")
-                while isinstance(request, Request):
-                    # print(f"Proc Req: {type(request).__qualname__} {request}")
-                    request = await request.handle()
-                # print("Request Handled")
+                await request
 
                 # Compile Client Buffer
                 cbuffer = (await client.buffer._compile(client)).strip()
@@ -350,3 +419,6 @@ class Server:
                 except ConnectionError:    pass
                 if not alive:
                     writer.close()
+
+buffer.Python._Request = Request
+buffer.Python._Client = Client
