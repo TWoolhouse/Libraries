@@ -1,4 +1,4 @@
-from .._settings import collider
+from .._settings import collider, render
 
 class Settings:
 
@@ -6,6 +6,8 @@ class Settings:
         pass
 
     def collision(self) -> collider.Setting:
+        pass # Set Callback
+    def render(self) -> render.Setting:
         pass # Set Callback
 
     def _callback(self, func):

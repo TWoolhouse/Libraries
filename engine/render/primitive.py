@@ -21,7 +21,7 @@ class Primitive:
     def Transform(self, translate: Vector=Vector(0, 0), rotation: float=0.0, scale: Vector=Vector(1, 1)):
         raise error.render.PrimitiveError(self, "Can not Transform") from None
 
-    def _volatile(self, other) -> bool:
+    def _volatile(self):
         """Equality Operation"""
         return False
 

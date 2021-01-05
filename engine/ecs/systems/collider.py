@@ -10,11 +10,9 @@ __all__ = ["Collider"]
 class Collider(System):
 
     def __init__(self):
+        super().__init__()
         self.setting = Setting()
-        Application().setting.collision = self.get_settings
-
-    def get_settings(self) -> Setting:
-        return self.setting
+        Application().setting.collision = lambda: self.setting
 
     def update(self, application):
         colliders = set(self.components(CCollider))

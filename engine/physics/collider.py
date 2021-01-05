@@ -1,4 +1,5 @@
 import enum
+import functools
 from vector import Vector
 from ..ecs.components.collider import Collider
 
@@ -20,6 +21,7 @@ def detect(c1: Collider, c2: Collider) -> bool:
     return _d_detect_funcs[c1.shape][c2.shape](c1, c2)
 
 def rside(func) -> callable:
+    @functools.wraps(func)
     def _rside(c1: Collider, c2: Collider) -> bool:
         return func(c2, c1)
     return rside

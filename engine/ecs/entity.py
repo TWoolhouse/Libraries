@@ -21,9 +21,12 @@ class Entity:
             if component._running:
                 continue
             component.entity = self
-            if res := component.initialize():
-                raise error.ecs.InitializeComponent(self, component, res)
-            component._running = True
+            try:
+                if res := component.initialize():
+                    raise error.ecs.InitializeComponent(self, component, res)
+                component._running = True
+            except Exception as e:
+                raise error.ecs.InitializeComponent(self, component, e) from e
         return True
 
     def terminate(self) -> bool:

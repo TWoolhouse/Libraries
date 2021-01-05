@@ -1,4 +1,4 @@
-import sys
+import sys as __sys
 from vector import Vector
 from . import core
 from .core import layer
@@ -10,7 +10,7 @@ from . import component
 from . import physics
 from .core.application import main, app, instantiate
 
-class __Module(sys.modules[__name__].__class__):
+class __Module(__sys.modules[__name__].__class__):
     # Do janky things
     # Init the systems module so its already imported
     from .ecs import systems
@@ -21,7 +21,7 @@ class __Module(sys.modules[__name__].__class__):
     def __call__(self) -> core.Application:
         return app()
 
-sys.modules[__name__].__class__ = __Module
+__sys.modules[__name__].__class__ = __Module
 
 __all__ = [
 "Vector",

@@ -6,16 +6,18 @@ from ...render.primitive import Primitive
 
 from ...core.application import app as Application
 from ... import error
+from ..._settings.render import
 
 __all__ = ["Render", "RenderMulti", "RenderBatch"]
 
 class Render(Component):
 
-    def __init__(self, primative: Primitive, volatile=False):
+    def __init__(self, primative: Primitive, volatile=False, layer:int=):
         self._original = primative
         self._drawn = self._original
 
-        self._vcache = self._original.Transform() if volatile else False
+        self._vol = volatile
+        self._vcache = self._original._volatile() if self._vol else None
 
         self._update = True
 
@@ -36,9 +38,10 @@ class Render(Component):
         self._drawn = self._original.Transform(*self._global_transform)
 
     def _volatile(self) -> bool:
-        if self._original._volatile(self._vcache):
+        vol = self._original._volatile()
+        if vol == self._vcache:
             return False
-        self._vcache = self._original.Transform()
+        self._vcache = vol
         return True
 
     def primative(self) -> Primitive:
