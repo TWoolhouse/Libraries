@@ -3,9 +3,95 @@ from interface import Interface
 import subprocess
 import urllib.request
 import http.client
+import collections
 from typing import Union
 
-__all__ = ["Request", "Process", "ProcessFast"]
+__all__ = ["Counter", "MultiQueue", "Request", "Process", "ProcessFast"]
+
+class MultiQueue:
+
+    def __init__(self):
+        self._loop = Interface.loop
+        self.queues: dict[..., asyncio.Queue] = {}
+        self._getters = collections.deque()
+
+    def create(self, key, queue: asyncio.Queue):
+        self.queues[key] = queue
+    def delete(self, key):
+        return self.queues.pop(key, None)
+    def __getitem__(self, key) -> asyncio.Queue:
+        return self.queues[key]
+
+    async def get(self, *keys):
+        queues = {self.queues[key] for key in keys}
+        output = self._loop.create_future()
+
+        tasks = {self._loop.create_task(self._get_one(output, q)) for q in queues}
+
+        try:
+            for queue in queues:
+                try:
+                    r = queue.get_nowait()
+                    queue.task_done()
+                    return r
+                except asyncio.QueueEmpty:
+                    pass
+
+            return await output
+        finally:
+            for fut in tasks:
+                fut.cancel()
+
+    async def _get_one(self, output: asyncio.Future, queue: asyncio.Queue):
+        while queue.empty(): # See asyncio.Queue implmentation
+            fut = queue._loop.create_future()
+            queue._getters.append(fut)
+            try:
+                await fut
+            except:
+                getter.cancel()
+                try:
+                    queue._getters.remove(getter)
+                except ValueError:
+                    pass
+                if not queue.empty() and not getter.cancelled():
+                    queue._wakeup_next(queue._getters)
+                raise
+        if not output.done():
+            output.set_result(queue.get_nowait())
+            queue.task_done()
+
+    def qsize(self) -> int:
+        return sum(q.qsize() for q in self.queues.values())
+
+class Counter:
+    def __init__(self, value: int=0):
+        self.value = value
+        self._fut = set()
+
+    def __await__(self):
+        return self.wait().__await__()
+    async def wait(self):
+        if not self.value: # Return instantly if counter is at 0
+            return True
+
+        fut = Interface.loop.create_future()
+        self._fut.add(fut)
+        return await fut
+
+    def incr(self, value: int=1):
+        self.value += abs(value)
+        return self.value
+    def decr(self, value: int=1):
+        self.value -= min(self.value, abs(value))
+
+        if not self.value:
+            for fut in self._fut:
+                fut.set_result(True)
+            self._fut.clear()
+        return self.value
+    def clear(self):
+        return self.decr(self.value)
 
 class Process:
 
