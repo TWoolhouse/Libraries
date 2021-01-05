@@ -1,17 +1,25 @@
-import functools as __functools
+import sys as __sys
 import time as __time
 import asyncio as __async
+import functools as __functools
 __print = print
 
 flag = False
 
 def __null(*args, **kwargs):
     return
-
-def wrapper(func):
+def null(func):
+    """Null Decorator"""
     return func
-call = time = catch = log = wrapper
+
+call = time = catch = log = null
 print = print
+
+class cfg:
+    def __init__(self):
+        self.output = None
+
+cfg = cfg()
 
 def enable():
     global flag
@@ -23,6 +31,10 @@ def enable():
         except AttributeError:
             return f.__class__.__qualname__
 
+    # Debug Print
+    def print_log(*args, **kwargs):
+        __print(*args, **({"file": __sys.stderr if cfg.output is None else cfg.output} | kwargs))
+
     # Logging
     def log(func):
         """Output Result of Func"""
@@ -30,14 +42,14 @@ def enable():
             @__functools.wraps(func)
             async def debug_log(*args, **kwargs):
                 res = await func(*args, **kwargs)
-                __print(name(func), args, kwargs, res)
+                print(name(func), args, kwargs, res)
                 return res
             return debug_log
         else:
             @__functools.wraps(func)
             def debug_log(*args, **kwargs):
                 res = func(*args, **kwargs)
-                __print(name(func), args, kwargs, res)
+                print(name(func), args, kwargs, res)
                 return res
             return debug_log
 
@@ -49,7 +61,7 @@ def enable():
             start = __time.time()
             res = func(*args, **kwargs)
             end = __time.time()
-            __print(end - start)
+            print(end - start)
             return res
         return debug_time
 
@@ -61,8 +73,8 @@ def enable():
             async def debug_catch(*args, **kwargs):
                 try:
                     return await func(*args, **kwargs)
-                except Exception:
-                    __print(name(func), args, kwargs)
+                except Exception as e:
+                    print(name(func), args, kwargs, name(e), e)
                     raise
             return debug_catch
         else:
@@ -70,8 +82,8 @@ def enable():
             def debug_catch(*args, **kwargs):
                 try:
                     return func(*args, **kwargs)
-                except Exception:
-                    __print(name(func), args, kwargs)
+                except Exception as e:
+                    print(name(func), args, kwargs, name(e), e)
                     raise
             return debug_catch
 
@@ -80,12 +92,12 @@ def enable():
         """Output Func Call Arguments"""
         @__functools.wraps(func)
         def debug_call(*args, **kwargs):
-            __print(name(func), args, kwargs)
+            print(name(func), args, kwargs)
             return func(*args, **kwargs)
         return debug_call
 
     to_update = {
-        "print": __print,
+        "print": print_log,
         "log": log,
         "time": time,
         "catch": catch,
@@ -99,7 +111,7 @@ def disable():
 
     to_update = {
         "print": __null,
-        **{f: wrapper for f in ("log", "time", "catch", "call")},
+        **{f: null for f in ("log", "time", "catch", "call")},
     }
     globals().update(**to_update)
 
