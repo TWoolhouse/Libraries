@@ -74,10 +74,12 @@ class Column:
         self.parent = None
 
     @classmethod
-    def Foreign(cls, name: str, link: "Column", *types: Tuple[Type, ...]) -> "Column":
+    def Foreign(cls, name: str, link: "Column", delete="CASCADE", update="CASCADE", *types: Tuple[Type, ...]) -> "Column":
         if isinstance(link, Table):
             link = link[0]
-        return cls(name, Type.INT, *types, link=link)
+        col = cls(name, Type.INT, *types, link=link)
+        col._on = (delete, update)
+        return col
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__ if not self.link else self.__class__.__name__+'.Foreign'}<{self.parent.id if self.parent else 0}.{self.id}:{self.name} ({' '.join(map(get_etype_value, self.types))})>"
@@ -188,21 +190,21 @@ class Cursor:
     def create_table(self, tables: dict, name: str, *columns: Column) -> Table:
         fname = fmt_name(name)
         ct = (f"{col.name} {' '.join(map(get_etype_value, col.types))}" for col in columns)
-        fc = (f"FOREIGN KEY ({col.name}) REFERENCES {col.link.parent.name}({col.link.name})" for col in columns if col.link is not None)
+        _on_modes = {"NULL": "SET NULL", "DEFAULT": "SET DEFAULT", "RESTRICT": "RESTRICT", "ACTION": "NO ACTION", "CASCADE": "CASCADE"}
+        fc = (f"FOREIGN KEY ({col.name}) REFERENCES {col.link.parent.name}({col.link.name}) {f'ON DELETE {_on_modes.get(col._on[0].upper(), col._on[0])}' if hasattr(col, '_on') and col._on[0] else ''} {f'ON UPDATE {_on_modes.get(col._on[1].upper(), col._on[1])}' if hasattr(col, '_on') and col._on[1] else ''}".strip() for col in columns if col.link is not None)
         self._s_create_table(fname, f"id {Type.AIPK.value}", *ct, *fc)
         tid = self._s_insert_into("__metadata__", ("name",), (fname,))
         for index, col in enumerate(columns, start=1):
-            col.id = self._s_insert_into("__columndata__", ("tid", "idx", "name", "type", "lid"), (tid, index, col.name, ",".join(map(get_etype_value, col.types)), col.link.id if col.link else None))
+            col.id = self._s_insert_into("__columndata__", ("tid", "idx", "name", "type", "lid"), (tid, index, col.name, ",".join(map(get_etype_value, col.types)), col.link.id+1 if col.link else None))
         # tbl = Table(name, *columns, id=tid)
         return self.__load_table(tables, tid, fname)
 
     @debug.call
     def create_new(self):
+        self.exec("PRAGMA foreign_keys=true")
+        self.exec("PRAGMA auto_vacuum=FULL")
         self._s_create_table("__metadata__", f"id {Type.AIPK.value}", f"name {Type.STR.value}")
-        # meta = self.create_table("__metadata__", Column("id", Type.AIPK), Column("name", Type.STR))
-        self._s_create_table("__columndata__", f"id {Type.AIPK.value}", f"tid {Type.INT.value}", f"idx {Type.INT.value}", f"name {Type.STR.value}", f"type {Type.STR.value}", f"lid {Type.INT.value}", f"FOREIGN KEY (tid) REFERENCES __metadata__(id)", f"FOREIGN KEY (lid) REFERENCES __columndata__(id)")
-        # self.create_table("__columndata__", Column("id", Type.AIPK), Column.Foreign("tid", meta[0]), Column("idx", Type.INT), Column("name", Type.STR), Column("type", Type.STR), Column.Foreign("lid", Table("__columndata__")))
-        self.exec("VACUUM")
+        self._s_create_table("__columndata__", f"id {Type.AIPK.value}", f"tid {Type.INT.value}", f"idx {Type.INT.value}", f"name {Type.STR.value}", f"type {Type.STR.value}", f"lid {Type.INT.value}", f"FOREIGN KEY (tid) REFERENCES __metadata__(id) ON DELETE CASCADE ON UPDATE CASCADE", f"FOREIGN KEY (lid) REFERENCES __columndata__(id) ON DELETE CASCADE ON UPDATE CASCADE")
 
     @debug.log
     @debug.catch
@@ -219,7 +221,7 @@ class Cursor:
         return self.__cursor.lastrowid
 
     def _s_create_table(self, name: str, *columns: str):
-        self.exec(f"CREATE TABLE {name} ({', '.join(columns)})")
+        self.exec(f"CREATE TABLE IF NOT EXISTS {name} ({', '.join(columns)})")
 
     def close(self):
         try:
@@ -245,7 +247,7 @@ class Cursor:
         for col in self.fetch(0):
             self.__load_column(tables, col)
         cols = [tbl[i] for i in sorted(tbl.keys())][1:]
-        tbl = tables[name] = Table(name, *cols, id=tid)
+        tbl = tables[tid] = tables[name] = Table(name, *cols, id=tid)
         return tbl
 
     def __load_column(self, tables: dict, col: (int, dict)) -> Column:
@@ -261,7 +263,7 @@ class Cursor:
                 table = tbl
                 break
 
-        column = table[col["idx"]] = Column(col["name"], *col["type"].split(","), link=self.__load_column(columns, col["lid"]) if col["lid"] else None, id=col["id"])
+        column = table[col["idx"]] = Column(col["name"], *col["type"].split(","), link=self.__load_column(tables, col["lid"]) if col["lid"] else None, id=col["id"])
         return column
 
 class Connection(sqlite3.Connection):
@@ -273,6 +275,7 @@ class Connection(sqlite3.Connection):
         self.__cursors = {}
         self.cursor()
         self.__open = True
+        self.cursor().exec("PRAGMA threads=4")
 
     def cursor(self, name: str="default") -> Cursor:
         try:
@@ -283,6 +286,7 @@ class Connection(sqlite3.Connection):
 
     def close(self):
         self.__open = False
+        self.cursor().exec("PRAGMA optimize")
         for cursor in self.__cursors.values():
             cursor.close()
         self.commit()
