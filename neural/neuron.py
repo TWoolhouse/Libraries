@@ -1,23 +1,26 @@
-import neural.maths
+from .maths import sigmoid as _sigmoid
 
 class Neuron:
 
     def __init__(self, id: int, bias: float=0, value: float=None):
         self.id = id
         self.bias = bias
-        self.__value = value
-        self._connections = {}
+        self._value = value
+        self._connections: dict[Neuron, float] = {}
 
-    def value(self):
-        if self.__value is None:
-            self.__value = neural.maths.sigmoid(
-                sum(neuron.value() * weight for neuron, weight in self._connections.values())
-                + self.bias
-            )
-        return self.__value
+    def value(self) -> float:
+        if self._value is None:
+            self._value = self._calc()
+        return self._value
 
-    def set(self, value: float=None):
-        self.__value = value
+    def _calc(self) -> float:
+        return _sigmoid(
+            sum(neuron.value() * weight for neuron, weight in self._connections.values())
+            + self.bias
+        )
+
+    def _clear(self):
+        self._value = None
 
     def __hash__(self) -> int:
         return id(self)
@@ -26,4 +29,28 @@ class Neuron:
         return self.id, self.bias, self._connections
     def __setstate__(self, data: tuple):
         self.id, self.bias, self._connections = data
-        self.__value = None
+        self._value = None
+
+Hidden = Neuron
+
+class Input(Neuron):
+    def set(self, value: float):
+        self._clear()
+        self._value = value
+
+class Recurrent(Neuron):
+
+    def __init__(self, id: int, bias: float=0, value: float=None):
+        super().__init__(id, bias, value)
+        self.previous: Neuron = Input(-id, bias, 0.0)
+        self._connections[self.previous] = 1.0
+
+    def _clear(self):
+        self.previous.set(self._value)
+        super()._clear()
+
+    def _calc(self) -> float:
+        return _sigmoid(
+            sum(neuron.value() * weight for neuron, weight in self._connections.values())
+            + self.bias
+        )
