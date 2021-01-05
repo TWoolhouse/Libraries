@@ -16,7 +16,7 @@ class TrackPathFile(TrackBase):
         self._file = sf.SoundFile(self.path)
         self._duration_total = int(self._file.frames)
     async def _close(self):
-        super()._close()
+        await super()._close()
         if self._file is not None:
             self._file.close()
 

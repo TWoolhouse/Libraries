@@ -23,6 +23,6 @@ class TrackRawFile(TrackBase):
             raise ValueError
 
     async def _close(self):
-        super()._close()
+        await super()._close()
         if self.file is not None and not self.file.closed and self._close_file:
             self.file.close()

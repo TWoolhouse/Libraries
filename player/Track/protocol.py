@@ -66,3 +66,4 @@ class TrackStream(TrackRawFile, asyncio.Protocol):
     async def _close(self):
         if not self.transport.is_closing():
             self.transport.close()
+        await super()._close()
