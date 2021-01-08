@@ -145,7 +145,7 @@ class DataInterface:
             return True
         return False
 
-Dispatch = Callable[[DataInterface, Data], Any]
+Dispatch = Callable[[DataInterface, Data], bool]
 
 class Client(DataInterface):
     def __init__(self, addr: str, port: int, **dispatch: Dispatch):
@@ -200,6 +200,7 @@ class Server:
         async with self.__server:
             fut.set_result(True)
             await self.__server.serve_forever()
+        self.close()
 
     async def serve(self):
         if self.__open:
