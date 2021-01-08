@@ -293,17 +293,22 @@ class Server:
         self.request = request
         self.client = client
         self.host, self.port = host, port
-        self.ssl = ssl
+        self.ssl = 443 if ssl == True else ssl
         self.data = Server.Data(self.port, self.ssl)
+        self.__open = None
 
     async def serve(self):
-        debug.print(f"Opening Server: {self.port}{' && {}'.format(self.ssl) if self.ssl else ''}")
-        self.__server = await asyncio.start_server(self.__create_client, self.host, self.port, backlog=500, start_serving=False)
-        self.__server_ssl = await asyncio.start_server(lambda r, w: self.__create_client(r, w, True), self.host, self.ssl, backlog=500, ssl=ssl_context, start_serving=False) if self.ssl is not None else self.__server
-        async with self.__server, self.__server_ssl:
-            if self.__server_ssl is not self.__server:
-                await self.__server_ssl.start_serving()
-            await self.__server.serve_forever()
+        try:
+            debug.print(f"Opening Server: {self.port}{' && {}'.format(self.ssl) if self.ssl else ''}")
+            self.__server = await asyncio.start_server(self.__create_client, self.host, self.port, backlog=500, start_serving=False)
+            self.__server_ssl = await asyncio.start_server(lambda r, w: self.__create_client(r, w, True), self.host, self.ssl, backlog=500, ssl=ssl_context, start_serving=False) if self.ssl is not None else self.__server
+            async with self.__server, self.__server_ssl:
+                if self.__server_ssl is not self.__server:
+                    await self.__server_ssl.start_serving()
+                await self.__server.serve_forever()
+            return True
+        finally:
+            self.__open = None
 
     async def __create_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, ssl=False):
         TIMEOUT = 300
@@ -419,6 +424,16 @@ class Server:
                 except ConnectionError:    pass
                 if not alive:
                     writer.close()
+
+    async def __aenter__(self):
+        if self.__open is None:
+            self.__open = Interface.schedule(self.serve())
+        return self
+
+    async def __aexit__(self, *args):
+        if self.__open is not None:
+            self.__open.cancel()
+        return
 
 buffer.Python._Request = Request
 buffer.Python._Client = Client

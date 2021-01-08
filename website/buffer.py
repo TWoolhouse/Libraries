@@ -139,4 +139,3 @@ class Json(Buffer):
 
     def __str__(self) -> str:
         return f"JSON<{self.data}>"
-
