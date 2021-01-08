@@ -1,12 +1,16 @@
+import os
+import queue
 import asyncio
-import concurrent.futures
 import functools
+import threading
+import traceback
+import concurrent.futures
 import multiprocessing as mp
 from typing import Union, Any, IO, Coroutine, Callable
-import traceback
 
 class Batch:
     def __init__(self):
+        self.__trigger = False
         self.__callbacks = set()
 
     def schedule(self, function: Union[Coroutine, Callable, asyncio.Future], *args: Any, **kwargs: Any) -> asyncio.Future:
@@ -19,25 +23,35 @@ class Batch:
                     function.throw(asyncio.CancelledError)
             except Exception as e:
                 fut.set_exception(e)
-        self.__callbacks.add(execute())
+        if self.__trigger:
+            execute = execute()
+        self.__callbacks.add(execute)
         return fut
 
     async def finish(self):
+        self.__callbacks = {c() for c in self.__callbacks}
+        self.__trigger = True
         while self.__callbacks:
             callbacks = self.__callbacks.copy()
             await Interface.wait(*callbacks)
             self.__callbacks -= callbacks
+        self.__trigger = False
 
 class Interface:
 
     def __init__(self):
+        try:
+            self.__loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self.__loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.__loop)
         self.__executor_io = concurrent.futures.ThreadPoolExecutor(thread_name_prefix=f"{self}-Thread")
         self.__executor_cpu = concurrent.futures.ProcessPoolExecutor()
-        self.__loop = asyncio.get_event_loop()
         self.__loop.set_debug(False) # Debug
         self.__loop.set_default_executor(self.__executor_io)
         self.__active = asyncio.Event()
         self.__active.set()
+        self.__thread = None
 
         self.terminate = Batch()
 
@@ -50,10 +64,15 @@ class Interface:
         return not self.__active.is_set()
 
     def stop(self):
+        if self.__thread != threading.current_thread():
+            return self.schedule(self.stop)
+        s = self.__active.is_set()
         self.__active.set()
-        self.__loop.stop()
+        if not s:
+            self.__loop.stop()
 
     def main(self):
+        self.__thread = threading.current_thread()
         try:
             self.__active.clear()
             with self.__executor_cpu, self.__executor_io:
@@ -98,6 +117,12 @@ class Interface:
 
     def create(self) -> "Interface":
         return self.__class__()
+
+    def main_thread(self):
+        def run():
+            asyncio.set_event_loop(self.__loop)
+            self.main()
+        threading.Thread(target=run, name=self.__class__.__name__).start()
 
     def gather(self, *coro: Union[Coroutine, asyncio.Future], exception=False) -> asyncio.Future:
         return asyncio.gather(*coro, return_exceptions=exception)
@@ -212,4 +237,3 @@ class Interface:
 
 if Interface.single():
     Interface = Interface()
-    interface = Interface

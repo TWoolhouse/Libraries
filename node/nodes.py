@@ -1,346 +1,238 @@
-from node.data import Data, Tag
-from node import error
-from node import dispatch
-import queue
-import socket
-import threading
-import secrets
-import time
-import libs
-import crypt
-import hashes
+import asyio
+import asyncio
+from interface import Interface
+from .data import Data, Tag
+from typing import Union, Type, Tuple, Callable, Any
+from collections import defaultdict
+import debug
 
-__all__ = ["Client", "ServerClient", "Server"]
+__all__ = ["Server", "Client"]
 
-BUFFER_SIZE = 4096
-
-class Thread:
-    def __init__(self, func: callable):
-        self.event = threading.Event()
-        self.func = self.threading(func)
-        self.arg = func.__self__
-        self.thread = threading.Thread(target=self.func, args=(self.arg, self.event))
-    def start(self, event):
-        self.event.set()
-        self.event = event
-        self.thread = threading.Thread(target=self.func, args=(self.arg, self.event))
-        self.thread.start()
-    def threading(self, func: callable) -> callable:
-        @error.handle(error.CloseError, True, close=True)
-        @error.log()
-        def threading(node, event):
-            while event.is_set():
-                func()
-        return threading
-
-def data_send(data: Data) -> bytes:
-    pre = "{}<#>{}<#>".format("|".join(data.prefixes), "|".join(data.tags)).encode("utf-8")
-    data = data.data if isinstance(data.data, bytes) else str(data.data).encode("utf-8")
-    return pre+data
-
-def data_recv(data: bytes) -> Data:
-    pre, tag, data = data.split(b"<#>", 2)
-    pre = pre.decode("utf-8").split("|")
-    tag = tag.decode("utf-8").split("|")
-    data = data if "BIN" in pre else data.decode("utf-8")
-    return Data(data, *pre, *map(Tag, tag))
-
-def _close_server_client(func, server):
-    def _close(self):
-        r = func(self)
-        server.connections.discard(self)
-        return r
-    return _close
-
-def clear_queue(q: queue.Queue):
-    out = []
-    try:
-        while True:
-            out.append(q.get(False))
-            q.task_done()
-    except queue.Empty:    pass
-    return out
+TIMEOUT = 100
 
 class Node:
-
-    def __init__(self, c_socket: socket.socket, addr: str, port: int):
-        self.c_socket = c_socket
-        self.addr = addr
-        self.port = port
-        self.event = threading.Event()
-        self._queues = {
-            "send": queue.Queue(),
-            "recv": queue.Queue(),
-            "error": queue.Queue()
-            }
-        self._threads = {
-            "send": Thread(self._thread_send),
-            "recv": Thread(self._thread_recv),
-            }
-        self._outputs = {
-            "error": [],
-            }
-
-    def open(self):
-        if not self.event.is_set():
-            self.event = threading.Event()
-            self.event.set()
-            for queue in self._queues.values():
-                clear_queue(queue)
-            self._start()
-
-    def close(self):
-        try:
-            self.event.clear()
-            self.c_socket.close()
-        except (ConnectionError, OSError):
-            pass
-
-    @property
-    def errors(self):
-        self._outputs["error"].extend(clear_queue(self._queues["error"]))
-        return self._outputs["error"]
-
-    def err(self, err: error.NodeBaseError) -> error.NodeBaseError:
-        self._queues["error"].put(err)
-        return err
-
-    def _start(self):
-        for thread in self._threads.values():
-            if isinstance(thread, list):
-                for t in thread:
-                    t.start(self.event)
-            else:
-                thread.start(self.event)
-
-    @error.handle(queue.Empty)
-    def _thread_send(self):
-        data = self._queues["send"].get(False)
-        try:
-            self._send(data)
-        finally:
-            self._queues["send"].task_done()
-
-    def _thread_recv(self):
-        old = b""
-        while self:
-            res = self._recv(old)
-            if not res:
-                continue
-            data, old = res
-            self._queues["recv"].put(data)
-
-    def __bool__(self) -> bool:
-        return self.event.is_set()
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        self.__open = True
+        self.__reader, self.__writer = reader, writer
+        self._read_loop = self._read_loop(self)
+        self._buffer = defaultdict(set)
+        self._queue = asyio.Counter()
 
     def __repr__(self) -> str:
-        return "[{}:{}]{}".format(self.addr, self.port, "X" if self else "0")
+        addr = self.__writer.get_extra_info("peername")
+        return f"<{'O' if self.__open else 'X'} {addr[0]}:{addr[1]}>"
 
-    # def __str__(self) -> str:
-    #     return ""
+    def __bool__(self) -> bool:
+        return self.__open
 
-    def __enter__(self):
-        self.open()
-        return self
-    def __exit__(self, exc_type, exc_value, traceback):
-        return self.close()
+    async def wait(self):
+        self._queue.wait()
 
-class NodeClient(Node):
-
-    _dispatchers = dispatch.dispatch
-
-    def __init_subclass__(cls, **kwargs):
-        init_subclass = cls.__init_subclass__.__func__
-        def _init_subclass(sub_cls, dispatchers=(), **sub_kwargs):
-            sub_cls._dispatchers = {**super(cls, cls)._dispatchers, **sub_cls._dispatchers, **{d.__name__ : d for d in dispatchers}}
-            init_subclass(sub_cls, **sub_kwargs)
-        cls.__init_subclass__ = classmethod(_init_subclass)
-
-    def __init__(self, c_socket: socket.socket, addr: str, port: int, dispatchers=()):
-        super().__init__(c_socket, addr, port)
-        self._queues["handle"] = queue.Queue()
-        self._threads["handle"] = [Thread(self._thread_handle) for i in range(3)]
-        self._outputs["data"] = []
-        self._encrypt = {
-            "private": secrets.randbits(16),
-            "secret": 1,
-        }
-
-        self._dispatchers =  {**self._dispatchers, **{d.__name__: d for d in dispatchers}}
-
-    def open(self):
-        self._encrypt["secret"] = 1
-        super().open()
-
-    def send(self, data: (str, Data), *prefixes: str):
-        data = Data(data.data, *prefixes, *data.prefixes) if isinstance(data, Data) else Data(data, *prefixes)
-        self._queues["send"].put(data_send(data))
-        return self
-
-    @property
-    def output(self):
-        self._outputs["data"].extend(clear_queue(self._queues["handle"]))
-        return self._outputs["data"]
-
-    def recv(self, *prefixes, wait: int=False, timeout: int=False, err=False) -> [Data,]: # interval=0
-        require = Data(False, *prefixes)
-        start_time = time.time()
-        results = [data for data in self.output if all(prefix in data.prefixes for prefix in require.prefixes) and all(tag in data.tags for tag in require.tags)]
-        for res in results:
-            try:
-                self._outputs["data"].remove(res)
-            except ValueError:  pass
-        while len(results) < wait and ((time.time() - start_time < timeout) if timeout else True):
-            results.extend((data for data in self.output if all(prefix in data.prefixes for prefix in require.prefixes) and all(tag in data.tags for tag in require.tags)))
-            for res in results:
-                try:
-                    self._outputs["data"].remove(res)
-                except ValueError:  pass
-            if not self:
-                results.extend(self.recv(*require.prefixes, *map(Tag, require.tags)))
-                break
-            # time.sleep(interval)
-        if not results and wait and ((not timeout) or err):
-            raise error.CloseError(self)
-        return results
-
-    def join(self, queue: ("send", "recv", "handle")="send", *queues):
-        qs = [queue, *queues]
-        queues = []
-        for q in qs:
-            queues.append(q) if q != "all" else queues.extend(("send", "recv", "handle"))
-        for q in queues:
-            self._queues[q].join()
-
-    @error.handle((ConnectionError, OSError), error.CloseError, close=True)
-    def _send(self, data: bytes):
-        data = crypt.encrypt(data, self._encrypt["secret"])
-        self.c_socket.send(data+b"<|>")
-
-    @error.handle((ConnectionError, OSError), error.CloseError, close=True)
-    def _recv(self, raw=b"") -> (bytes, bytes):
-        while b"<|>" not in raw:
-            raw += self.c_socket.recv(BUFFER_SIZE)
-        data, old = raw.split(b"<|>", 1)
-        data = crypt.decrypt(data, self._encrypt["secret"])
-        return data, old
-
-    @error.handle(error.DispatchError)
-    @error.log()
-    def _handle(self, data: Data):
-        for prefix in data.prefixes:
-            try:
-                if not self._dispatchers[prefix](self, data).handle():
-                    return False
-            except KeyError:
-                continue
-        self._queues["handle"].put(data)
-
-    @error.handle(error.EncryptionError)
-    @error.log(error.EncryptionError)
-    @error.handle(queue.Empty)
-    def _thread_handle(self):
-        data = self._queues["recv"].get(False)
+    @Interface.Repeat
+    async def _read_loop(self):
         try:
-            try:
-                data = data_recv(data)
-            except ValueError as e:
-                raise error.EncryptionError(self, "Message was not decrypted!") from None
-            self._handle(data)
-        finally:
-            self._queues["recv"].task_done()
+            data = await asyncio.wait_for(self.__reader.readuntil(b"<#>"), TIMEOUT)
+        except asyncio.exceptions.IncompleteReadError as e:
+            return True
+        except ConnectionError as e:
+            return True
+        except asyncio.TimeoutError as e:
+            return True
+        if data:
+            Interface.schedule(self._process_data(data[:-3]))
 
-class Client(NodeClient):
+    @_read_loop.exit
+    async def close(self):
+        self.__open = False
+        self._read_loop.cancel()
+        self.__writer.close()
+        try:
+            await self.__writer.wait_closed()
+        except ConnectionError:
+            pass
 
-    def __init_subclass__(cls, **kwargs):
-        pass
+    async def _dispatch(self, data: Data) -> bool:
+        return True
 
-    def __init__(self, addr: str, port: int, dispatch=(), password=None):
-        super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port, dispatch)
-        self._encrypt["password"] = str(password)
+    async def _process_data(self, data: bytes):
+        head, tag, payload = data.split(b"|")
+        head = head.decode("utf8").split("!")
+        dtype, head = head[0], head[1:]
+        tag = tag.decode("utf8").split("!")
+        data = Data(payload, *head, *map(Tag, filter(None, tag)))
+        data.data = data._decode(dtype)
+        proc_data = await self._dispatch(data)
+        if proc_data:
+            for pre in (*data.head, *data.tag):
+                if pre:
+                    self._buffer[pre].add(data)
 
-    @error.handle((ConnectionError, OSError), error.CloseError, close=True)
-    @error.log()
-    def open(self):
-        if not self:
-            self.c_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.c_socket.connect((self.addr, self.port))
-            super().open()
+    async def _write(self, data: Data):
+        dtype, payload = data._encode()
+        head = "!".join([dtype]+data.head).encode("utf8")
+        tag = "!".join(map(str, data.tag)).encode("utf8")
+        block = head+b"|"+tag+b"|"+payload+b"<#>"
+        # print(block)
+        self.__writer.write(block)
+        try:
+            await self.__writer.drain()
+            self._queue.decr()
+        except ConnectionError:
+            self._queue.decr()
+            await self.close()
+        return True
 
-            #--- Diffie-Hellman ---#
-            if self.recv("ENCRYPT", Tag("END"), wait=True, err=True)[0].data != "True":
-                raise error.CloseError(self, "Encryption Failure")
-            self.send(True, "DATA", "ENCRYPT", Tag("END"))
+    def _read(self, *prefix: Union[str, Tag]) -> Tuple[Data]:
+        match = []
+        for packet in self._buffer[prefix[0]]:
+            if all(pre in (*packet.head, *packet.tag) for pre in prefix[1:]):
+                match.append(packet)
+        for packet in match:
+            for pre in (*packet.head, *packet.tag):
+                self._buffer[pre].discard(packet)
+        return match
 
-            #--- Password ---#
-            self.send(self._encrypt["password"], "DATA", "PASSWORD")
-            if self.recv("PASSWORD", wait=True, err=True)[0].data != "True":
-                raise error.CloseError(self, "Password Incorrect")
+class DataInterface:
 
-class ServerClient(NodeClient):
+    __DISPATCH_PREFIX = "dsptch_"
 
-    def __init_subclass__(cls, **kwargs):
-        pass
+    def __init__(self, dispatchers: dict[str, Callable[['DataInterface', Data], Any]]):
+        self.dispatchers = {k.upper(): v for k,v in dispatchers.items()} | {k[len(self.__DISPATCH_PREFIX):].upper(): getattr(self.__class__, k) for k in dir(self) if k.startswith(self.__DISPATCH_PREFIX)}
 
-    def __init__(self, c_socket: socket.socket, addr: str, port: int, server, dispatchers=()):
-        super().__init__(c_socket, addr, port, dispatchers)
-        self.server = server
+    def send(self, data: Union[Data, str, bytes], *head: Union[str, bytes, Tag]) -> asyncio.Future:
+        if not isinstance(data, Data):
+            if not head:
+                raise ValueError("Need atleast one header")
+            data = Data(data, *head)
+        self._node._queue.incr()
+        return Interface.schedule(self._node._write(data))
 
-    def close(self):
-        super().close()
-        # self.server.connections.remove(self)
+    async def recv(self, *prefix: Union[str, Tag], wait: bool=True) -> Tuple[Data]:
+        prefix = [p if isinstance(p, Tag) else p.upper() for p in prefix]
+        match = []
+        match.extend(self._node._read(*prefix))
+        while len(match) < wait:
+            if not (self._node or self._node is None):
+                return None
+            await Interface.next()
+            match.extend(self._node._read(*prefix))
+        return match
 
-    @error.handle(error.CloseError, close=True)
-    @error.log()
-    def open(self):
-        super().open()
+    async def wait(self):
+        await self._node._queue.wait()
 
-        #--- Diffie–Hellman ---#
-        if self.server._encrypt["base"]:
-            self.send(True, "ENCRYPT", Tag("CLIENT"))
+    async def close(self) -> bool:
+        if self._node is None:
+            return False
+        await self._node._queue.wait()
+        await self._node.close()
+        await self._node._read_loop.wait()
+        return True
+
+    async def open(self):
+        self._node._dispatch = self._dispatch
+        async def close_callback():
+            await self._node._read_loop.wait()
+            await self.close()
+        Interface.schedule(close_callback())
+
+    async def _dispatch(self, data: Data) -> bool:
+        for prefix in data.head:
+            if f := self.dispatchers.get(prefix, False):
+                if await Interface.schedule(f, self, data):
+                    break
         else:
-            self.send(True, "DATA", "ENCRYPT", Tag("END"))
-        if self.recv("ENCRYPT", Tag("END"), wait=True, timeout=5, err=True)[0].data != "True":
-            raise error.CloseError(self, "Encryption Failure")
+            return True
+        return False
 
-        #--- Password ---#
-        if self.recv("PASSWORD", wait=True, timeout=5, err=True)[0].data == self.server._encrypt["password"]:
-            self.send(True, "DATA", "PASSWORD")
-        else:
-            self.send(False, "DATA", "PASSWORD").join()
-            raise error.CloseError(self, "Password Incorrect")
+Dispatch = Callable[[DataInterface, Data], bool]
 
-class Server(Node):
+class Client(DataInterface):
+    def __init__(self, addr: str, port: int, **dispatch: Dispatch):
+        super().__init__(dispatch)
+        self.addr, self.port = addr, port
+        self._node = None
 
-    def __init__(self, addr: str, port: int, limit=10, client: ServerClient=ServerClient, dispatchers=(), encrypt=False, password=None):
-        super().__init__(socket.socket(socket.AF_INET, socket.SOCK_STREAM), addr, port)
-        del self._queues["recv"], self._threads["recv"]
+    async def open(self) -> bool:
+        if not self._node:
+            self._node = Node(*await asyncio.open_connection(self.addr, self.port))
+            await super().open()
+            return True
+        return False
+
+    def __enter__(self) -> 'Client':
+        raise NotImplementedError
+        return self
+
+    async def __aenter__(self) -> 'Client':
+        await self.open()
+        return self
+    async def __aexit__(self, *args):
+        return await self.close()
+
+class SClient(DataInterface):
+
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, dispatchers: dict[str, Dispatch], server: 'Server'):
+        super().__init__(dispatchers)
+        self._node = Node(reader, writer)
+        self.server: Server = server
+
+    async def close(self):
+        await super().close()
+        self.server.connections.pop(self, None)
+
+class Server:
+
+    def __init__(self, addr: str, port: int, limit: int=100, encrypt=False, client: Type[SClient]=SClient, **dispatch: Dispatch):
+        self.addr, self.port = addr, port
         self.limit = limit
         self.client = client
-        self.dispatchers = dispatchers
-        self.connections = set()
-        self._encrypt = {
-            "modulus": secrets.randbits(32),
-            "base": secrets.choice(range(2, 4)) if encrypt else False,
-            "password": str(password),
-        }
+        self.dispatchers = dispatch
+        self.__server = None
+        self.__open = False
+        self.__wait = asyncio.Event()
+        self.connections: dict[SClient, tuple] = {}
 
-        self.client.close = _close_server_client(self.client.close, self)
+    def __bool__(self):
+        return self.__open
 
-    def open(self):
-        self.c_socket.bind((self.addr, self.port))
-        self.c_socket.listen(self.limit)
-        super().open()
+    async def __serve(self, fut):
+        async with self.__server:
+            fut.set_result(True)
+            await self.__server.serve_forever()
+        self.close()
 
-    def close(self, kill=True):
-        super().close()
-        if kill:
-            for sc in list(self.connections):
-                sc.close()
+    async def serve(self):
+        if self.__open:
+            return
+        self.__open = True
+        self.__wait.clear()
+        self.__server = await asyncio.start_server(self.__create_client, self.addr, self.port, backlog=self.limit)
+        fut = Interface.loop.create_future()
+        Interface.schedule(self.__serve(fut))
+        await fut
 
-    @error.handle((ConnectionError, OSError), error.CloseError, close=True)
-    def _thread_send(self):
-        conn, addr = self.c_socket.accept()
-        client = self.client(conn, *addr, self, self.dispatchers)
-        self.connections.add(client)
-        client.open()
+    async def __create_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        addr = writer.get_extra_info("peername")
+        c = self.client(reader, writer, self.dispatchers, self)
+        await c.open()
+        self.connections[c] = addr
+
+    def close(self, all=False):
+        self.__server.close()
+        self.__open = False
+        self.__wait.set()
+
+    async def wait(self):
+        return await self.__wait.wait()
+
+    def __enter__(self) -> 'Server':
+        raise NotImplementedError
+        return self
+
+    async def __aenter__(self):
+        await self.serve()
+        return self
+    async def __aexit__(self, *args):
+        self.close()
+        return
