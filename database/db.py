@@ -28,7 +28,7 @@ class DBInterface:
         """Fetch Rows From Last Selection
         Amount: 0 is All"""
         return self.__c.fetch(amount)
-    
+
     @overload
     def select(self, tbl: Table, *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> Callable[[int], Iterable[Row]]:
         ...
@@ -214,6 +214,11 @@ class DatabaseAsync(Database):
                 self._queue_response[event] = RuntimeError()
         except asyncio.QueueEmpty:    pass
 
+    async def __aenter__(self):
+        return self.__enter__()
+    async def __aexit__(self, *args):
+        return self.__exit__(*args)
+
     def open(self) -> bool:
         self.__active = True
         if super().open():
@@ -222,7 +227,8 @@ class DatabaseAsync(Database):
         return False
 
     def close(self) -> bool:
-        self._queue.put_nowait(None)
+        self._queue.put_nowait([None]*4)
+        return True
 
     async def table(self, name: str, *cols: Column) -> Table:
         return await self.__func_call(super().table, name, *cols)
