@@ -1,8 +1,9 @@
+import time
 import debug
 import asyncio
 import functools
-import time
 from typing import Callable
+from interface import Interface
 
 __all__ = ["cache", "Manager", "Cache", "AsyncCache"]
 
@@ -122,6 +123,20 @@ class AsyncCache(Cache):
 class Manager:
     def __init__(self):
         self._instances = {}
+
+        @Interface.Repeat
+        async def timeout_loop():
+            self.timeout()
+        timeout_loop.delay = 10
+        timeout_loop()
+        self._timer = timeout_loop
+
+    @property
+    def timer(self) -> float:
+        return self._timer.delay
+    @timer.setter
+    def timer(self, value: float):
+        self._timer.delay = value
 
     def clear(self, permanence: int=1):
         for cache in self._instances.values():
