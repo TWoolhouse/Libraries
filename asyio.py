@@ -6,7 +6,7 @@ import http.client
 import collections
 from typing import Union
 
-__all__ = ["Counter", "MultiQueue", "Request", "Process", "ProcessFast"]
+__all__ = ["Counter", "MultiQueue", "Request", "Process", "ProcessFast", "StateWatcher"]
 
 class MultiQueue:
 
@@ -183,3 +183,54 @@ class Request:
 
     async def wait(self) -> Union[http.client.HTTPResponse, urllib.request.URLopener]:
         return await self.__proc
+
+class Nevent(asyncio.Event):
+    def __init__(self, clear=True):
+        super().__init__()
+        self._value = clear
+    def set(self):
+        return super().clear()
+    def clear(self):
+        return super().set()
+    def is_set(self):
+        return not self._value
+
+class StateWatcher:
+
+    def __init__(self, value, func="__eq__"):
+        self._val = value
+        self._waiters = {}
+        self._func = func
+
+    @property
+    def value(self):
+        return self._val
+
+    @value.setter
+    def value(self, value):
+        self._val = value
+        func = getattr(self._val, self._func)
+        for fut, val in tuple(self._waiters.items()):
+            if func(val):
+                fut.set_result(self._val)
+                del self._waiters[fut]
+        return value
+
+    def wait(self, value) -> asyncio.Future:
+        fut = Interface.loop.create_future()
+        if getattr(self._val, self._func)(value):
+            fut.set_result(self._val)
+            return fut
+        self._waiters[fut] = value
+        return fut
+
+    def chain(self, fut: asyncio.Future):
+        self.value: Status = fut.result()
+
+    def clear(self, cancel=False):
+        for fut in tuple(self._waiters.keys()):
+            if cancel:
+                fut.set_exception(RuntimeError)
+            else:
+                fut.set_result(self._val)
+            del self._waiters[fut]
