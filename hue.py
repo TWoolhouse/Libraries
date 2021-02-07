@@ -464,7 +464,7 @@ class Time:
             return "R" + "" if self.iter is None else str(min(max(self.iter, 0), 99)) + "/" + super()._fmt_req()
 
     class Date(Time):
-        _DFMT = "%Y:%m:%d"
+        _DFMT = "%Y-%m-%d"
         def __init__(self, date: datetime.date, time: datetime.time, random: datetime.time=None):
             self.date = date
             super().__init__(time, random)
@@ -758,3 +758,11 @@ class Bridge:
         data = await self.request("GET", "schedules")
         await Interface.gather(*(Schedule(self, int(index)).read(payload) for index, payload in data.items()))
         return self.lookup[Schedule].values()
+
+    async def time_set(self, time=None):
+        now = datetime.datetime.utcnow()
+        dt = Time.Date(now.date(), now.time())
+        fmt = dt._fmt_req()
+        print(fmt)
+        res = await self.request("PUT", "config", {"UTC":fmt})
+        print(res)
