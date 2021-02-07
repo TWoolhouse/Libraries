@@ -227,7 +227,7 @@ class DatabaseAsync(Database):
         return False
 
     def close(self) -> bool:
-        self._queue.put_nowait([None]*4)
+        self._queue.put_nowait([asyncio.Event(), None, None, None])
         return True
 
     async def table(self, name: str, *cols: Column) -> Table:
