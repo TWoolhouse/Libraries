@@ -71,7 +71,7 @@ class Python(File):
 
     def __init__(self, file: str, request: "Request"=None, cache_disable: bool=None):
         super().__init__(file, cache_disable)
-        self.__request = request
+        self._request = request
 
     def __await__(self):
         return self.compile().__await__()
@@ -90,10 +90,10 @@ class Python(File):
         data = await self.open(self.file, override=self.cache_disable)
         namespace = {
             "path": PATH,
-            "request": self.__request,
             "value": self.__wrap,
             "buffer": self.__insert_buffer,
         }
+        request = self._request or request
         if isinstance(request, self._Request):
             namespace["client"] = request.client
             namespace["request"] = request
@@ -123,10 +123,10 @@ class Python(File):
             return value
         return wrapper
     def __insert_buffer(self, path, type="py"): # Implement Types
-        return Python(path, self.__request).compile
+        return Python(path, self._request).compile
 
     def __str__(self) -> str:
-        return f"Python<File<{self.file}> Request<{self.__request}>>"
+        return f"Python<File<{self.file}> Request<{self._request}>>"
 
 class Json(Buffer):
 

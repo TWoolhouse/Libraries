@@ -1,16 +1,17 @@
-import debug
-import asyncio
-from interface import Interface
-import socket
 import ssl
-import urllib.parse
-from http import HTTPStatus as Status
-from http.cookies import SimpleCookie as Cookie
-from .buffer import Buffer
-from . import buffer
-from . import error
-from ._ssl import context as ssl_context
+import debug
+import socket
+import asyncio
+import caching
 import functools
+import urllib.parse
+from . import error
+from . import buffer
+from .buffer import Buffer
+from interface import Interface
+from http import HTTPStatus as Status
+from ._ssl import context as ssl_context
+from http.cookies import SimpleCookie as Cookie
 from typing import Type, Union, Callable, Any, overload
 
 import traceback
@@ -252,11 +253,11 @@ class Tree:
             req: Union[Tree, Type[Request], Type[Exception], Buffer, Callable[..., Any], Any] = self.__tree[seg]
         except IndexError as e: # Not in path
             index += 1
-            if issubclass(self.end, Exception):
+            if isinstance(self.default, type) and issubclass(self.end, Exception):
                 raise self.end(self, request.request, index) from None
             req = self.end
         except KeyError as e: # Not in tree
-            if issubclass(self.default, Exception):
+            if isinstance(self.default, type) and issubclass(self.default, Exception):
                 raise self.default(self, request.request, index, seg) from None
             req = self.default
 
@@ -271,9 +272,13 @@ class Tree:
             elif issubclass(req, Exception):
                 raise req(self, request.request, request.segment)
         elif isinstance(req, Buffer):
+            if isinstance(req, buffer.Python) and req._request is None:
+                req._request = request
             request.client.buffer << req
             return req
         elif callable(req):
+            if asyncio.iscoroutinefunction(req):
+                return await req(request, *args, **kwargs)
             return req(request, *args, **kwargs)
         else:
             return req
