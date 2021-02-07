@@ -6,7 +6,7 @@ import threading
 import traceback
 import concurrent.futures
 import multiprocessing as mp
-from typing import Union, Any, IO, Coroutine, Callable
+from typing import Union, Any, IO, Coroutine, Callable, Awaitable
 
 class Batch:
     def __init__(self):
@@ -85,7 +85,12 @@ class Interface:
             self.__loop.stop()
             self.__loop.close()
 
+    def schedulc(self, coro: Coroutine) -> asyncio.Future:
+        """Schedule a coroutine fast"""
+        return asyncio.ensure_future(coro, loop=self.__loop)
+
     def schedule(self, function: Union[Coroutine, Callable, asyncio.Future], *args: Any, **kwargs: Any) -> asyncio.Future:
+        """Schedule the function/coroutine to be called"""
         if asyncio.iscoroutine(function): # Coroutine
             return asyncio.wrap_future(asyncio.run_coroutine_threadsafe(function, self.__loop))
         elif asyncio.iscoroutinefunction(function): # Coroutine Function
@@ -119,10 +124,10 @@ class Interface:
         return self.__class__()
 
     def main_thread(self):
-        def run():
+        def InterfaceThread():
             asyncio.set_event_loop(self.__loop)
             self.main()
-        threading.Thread(target=run, name=self.__class__.__name__).start()
+        threading.Thread(target=InterfaceThread, name=self.__class__.__name__).start()
 
     def gather(self, *coro: Union[Coroutine, asyncio.Future], exception=False) -> asyncio.Future:
         return asyncio.gather(*coro, return_exceptions=exception)
@@ -132,6 +137,13 @@ class Interface:
 
     async def next(self, time: float=0):
         await asyncio.sleep(time)
+
+    def chain(self, wait: asyncio.Future, func: Union[Coroutine, Callable, asyncio.Future], *args, **kwargs) -> asyncio.Future:
+        fut = self.__loop.create_future()
+        def chain_fut_func(f):
+            asyncio.futures._chain_future(self.schedule(func, *args, **kwargs), fut)
+        wait.add_done_callback(chain_fut_func)
+        return fut
 
     def single(*_):
         return mp.current_process().name == "MainProcess"
