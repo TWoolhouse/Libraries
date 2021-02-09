@@ -1,11 +1,13 @@
 import tkinter as tk
 import tkinter.messagebox as tkm
 import tkinter.simpledialog as tkd
+from collections import deque
+from typing import Callable, Any
 
 class Window(tk.Tk):
     """Tk root Window"""
 
-    def __init__(self, title="Title", x=800, y=800, font="TkDefaultFont", parent=None):
+    def __init__(self, title: str="Title", x: int=800, y: int=800, font: str="TkDefaultFont", resolution: int=10, parent=None):
         """Title and Geometry """
         super().__init__()
         self.title(title)
@@ -15,11 +17,14 @@ class Window(tk.Tk):
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(2, weight=1)
         self.option_add("*Font", font)
-        self.pages = {}
-        self.active = None
+        self.pages: dict[str, Page] = {}
+        self.active: Page = None
         self.parent = parent
+        self.loop_resolution = resolution
+        self._loop_callbacks: deque[Callable[[], Any]] = deque()
+        self.after(self.loop_resolution, self.loop)
 
-    def show_page(self, page):
+    def show_page(self, page: str):
         """Takes a name and raises the Page to the front and calls Page.show()"""
         try:
             self.active = self.pages[page]
@@ -27,41 +32,45 @@ class Window(tk.Tk):
             raise KeyError("'{}' is not a page in this Window".format(page))
         self.pages[page]._show()
 
-    def add_page(self, page):
+    def add_page(self, page: 'Page'):
         """Takes a Page and adds it to the Windows stack of pages"""
         self.pages[page.name] = page
         page.grid(row=1, column=1, sticky="nsew")
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> 'Page':
         return self.pages[key]
 
-    def update(self):
-        self.active.update()
-        super().update()
+    def loop(self):
+        while self._loop_callbacks:
+            self._loop_callbacks.popleft()()
+        self.after(self.loop_resolution, self.loop)
+
+    def call(self, func: Callable[[], Any]):
+        self._loop_callbacks.append(func)
 
 class Page(tk.Frame):
     """Tk Frame"""
 
-    def __init__(self, parent, name, *args):
+    def __init__(self, parent: Window, name: str, *args):
         """Parent Window and the Name to be used in the dict of pages"""
         self.name = name
         self.parent = parent
         super().__init__(self.parent)
         self.parent.add_page(self)
-        self.widgets = {}
+        self.widgets: dict[str, tk.Widget] = {}
         self.grid_rowconfigure(0, weight=1)
         self.grid_rowconfigure(9999, weight=1)
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(9999, weight=1)
         self.setup(*args)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> tk.Widget:
         return self.widgets[key]
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value: tk.Widget):
         self.widgets[key] = value
 
-    def add(self, widget, name="_temp", **options):
+    def add(self, widget: tk.Widget, name: str="_temp", **options):
         """tk.Wiget, name in widget dict, grid options"""
         self.widgets[name] = widget
         if "sticky" not in options:
@@ -70,10 +79,10 @@ class Page(tk.Frame):
             del options["sticky"]
         self.widgets[name].grid(options)
 
-    def remove(self, widget):
+    def remove(self, widget: str):
         self.widgets[widget].grid_remove()
 
-    def edit(self, widget, key, value):
+    def edit(self, widget: str, key: str, value):
         """widget name, value to edit, value"""
         self.widgets[widget][key] = value
 
@@ -82,7 +91,7 @@ class Page(tk.Frame):
         self.tkraise()
         self.show()
 
-    def show_page(self, page):
+    def show_page(self, page: str):
         """Calls parent.show_page() with page"""
         self.parent.show_page(page)
 
@@ -127,10 +136,10 @@ class Dialog(tkd.Dialog):
         self.result = _res
         return 1
 
-def cmd(func, *options, **kwoptions):
+def cmd(func, *args, **kwargs):
     """Takes a function followed by its arguments"""
-    def command(*args, **kwargs):
-        return func(*options, **kwoptions)
+    def command(*a, **ka):
+        return func(*args, **kwargs)
     return command
 
 if __name__ == "__main__":
