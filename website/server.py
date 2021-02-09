@@ -192,7 +192,7 @@ class Request(metaclass=__MetaRequest):
         async def enforce_secure(self):
             if self.client.ssl:
                 return await func(self)
-            return self.default.ssl(self)
+            return await self.default.ssl(self)
         return enforce_secure
 
     def redirect(path=None, query=None, hostname=None, port=None, scheme="http"):
