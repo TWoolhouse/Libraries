@@ -1,8 +1,7 @@
 import tkinter as tk
 import tkinter.messagebox as tkm
 import tkinter.simpledialog as tkd
-import threading
-from collections import deque
+import queue
 from typing import Callable, Any
 
 class Window(tk.Tk):
@@ -22,8 +21,7 @@ class Window(tk.Tk):
         self.active: Page = None
         self.parent = parent
         self.loop_resolution = resolution
-        self._loop_callbacks: deque[Callable[[], Any]] = deque()
-        self._loop_mutex = threading.Lock()
+        self._loop_callbacks: deque[Callable[[], Any]] = queue.Queue()
         self.after(self.loop_resolution, self.loop)
 
     def show_page(self, page: str):
@@ -43,16 +41,14 @@ class Window(tk.Tk):
         return self.pages[key]
 
     def loop(self):
-        if self._loop_callbacks:
-            with self._loop_mutex:
-                self._loop_callbacks.popleft()()
-                while self._loop_callbacks:
-                    self._loop_callbacks.popleft()()
+        try:
+            while True:
+                self._loop_callbacks.get_nowait()()
+        except queue.Empty:    pass
         self.after(self.loop_resolution, self.loop)
 
     def call(self, func: Callable[[], Any]):
-        with self._loop_mutex:
-            self._loop_callbacks.append(func)
+        self._loop_callbacks.put_nowait(func)
 
 class Page(tk.Frame):
     """Tk Frame"""
