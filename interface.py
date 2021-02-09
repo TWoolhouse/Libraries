@@ -60,6 +60,12 @@ class Interface:
             return f"{self.__class__.__name__}"
         return f"{self.__class__.__name__}<{mp.current_process().name}>"
 
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        self.stop()
+        return
+
     def active(self) -> bool:
         return not self.__active.is_set()
 
@@ -128,6 +134,7 @@ class Interface:
             asyncio.set_event_loop(self.__loop)
             self.main()
         threading.Thread(target=InterfaceThread, name=self.__class__.__name__).start()
+        return self
 
     def gather(self, *coro: Union[Coroutine, asyncio.Future], exception=False) -> asyncio.Future:
         return asyncio.gather(*coro, return_exceptions=exception)
