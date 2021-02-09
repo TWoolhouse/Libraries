@@ -99,6 +99,9 @@ class DataInterface:
     def __init__(self, dispatchers: dict[str, Callable[['DataInterface', Data], Any]]):
         self.dispatchers = {k.upper(): v for k,v in dispatchers.items()} | {k[len(self.__DISPATCH_PREFIX):].upper(): getattr(self.__class__, k) for k in dir(self) if k.startswith(self.__DISPATCH_PREFIX)}
 
+    def __bool__(self) -> bool:
+        return self._node.__bool__()
+
     def send(self, data: Union[Data, str, bytes], *head: Union[str, bytes, Tag]) -> asyncio.Future:
         if not isinstance(data, Data):
             if not head:
