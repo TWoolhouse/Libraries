@@ -50,7 +50,7 @@ class Cache:
         Manager._instances[self.func] = self
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}:{len(self.cache)}{self.func}"
+        return f"{self.__class__.__name__}<{len(self.cache)}{self.func}>"
 
     def __del__(self):
         for key in (self.func, self._func_wrap):
@@ -123,10 +123,11 @@ class AsyncCache(Cache):
 class Manager:
     def __init__(self):
         self._instances = {}
+        self.permanence = 1
 
         @Interface.Repeat
         async def timeout_loop():
-            self.timeout()
+            self.timeout(self.permanence)
         timeout_loop.delay = 10
         timeout_loop()
         self._timer = timeout_loop
