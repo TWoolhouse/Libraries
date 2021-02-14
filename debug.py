@@ -1,3 +1,4 @@
+import atexit as _atexit
 import sys as __sys
 import time as __time
 import asyncio as __async
@@ -17,7 +18,16 @@ print = print
 
 class cfg:
     def __init__(self):
-        self.output = None
+        self._output_stream = None
+
+    @property
+    def output(self):
+        return self._output_stream
+    @output.setter
+    def output(self, file):
+        if isinstance(file, str):
+            file = open(file, "wb")
+        self._output_stream = file
 
 cfg = cfg()
 

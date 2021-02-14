@@ -4,17 +4,18 @@ import socket
 import asyncio
 import caching
 import functools
+import traceback
+import configparser
 import urllib.parse
 from . import error
 from . import buffer
+from path import PATH
 from .buffer import Buffer
 from interface import Interface
 from http import HTTPStatus as Status
 from ._ssl import context as ssl_context
 from http.cookies import SimpleCookie as Cookie
 from typing import Type, Union, Callable, Any, overload
-
-import traceback
 
 class Cookie(Cookie):
 
@@ -159,10 +160,23 @@ class DefaultRequest:
         pass
 
 class __MetaRequest(type):
+    def __init__(cls, name, bases, attrs):
+        cls.memory = cls
+        return super().__init__(name, bases, attrs)
     def __call__(self, caller: 'Request', *args, **kwargs):
         if isinstance(caller, Request):
             return super().__call__(caller.client, caller.request, caller.segment + 1, *args, **kwargs)
         return super().__call__(caller, *args, **kwargs)
+
+class __MetaRequestBranch(__MetaRequest):
+    def __init__(cls, name, bases, attrs):
+        PREFIX = "h_"
+        dct = cls.__dict__ | attrs
+        for c in cls.mro()[:-1]:
+            dct |= c.__dict__
+        funcs = {k[len(PREFIX):]:v for k,v in dct.items() if k.startswith(PREFIX)}
+        cls._r_tree = Tree(**funcs)
+        return super().__init__(name, bases, attrs)
 
 class Request(metaclass=__MetaRequest):
 
@@ -287,6 +301,31 @@ class Tree:
         if isinstance(item, dict):
             item = Tree(**item)
         self.__tree[key] = item
+
+def config(file: str) -> configparser.ConfigParser:
+    if cfg := config._static.get(file, False):
+        return cfg
+    cfg = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
+    fpath = f"{PATH}resource/config/{file}"
+    cfg.read(fpath)
+    config._static[file] = cfg
+    def write():
+        with open(fpath, "w") as f:
+            cfg.write(f)
+    Interface.terminate.schedule(write)
+    return cfg
+config._static = {}
+@Interface.Repeat
+async def _write_cfg():
+    for p,c in config._static.items():
+        async with Interface.AIOFile(f"{PATH}resource/config/{p}", "w") as f:
+            c.write(f)
+_write_cfg.delay = 60
+_write_cfg()
+
+class RequestBranch(Request, metaclass=__MetaRequestBranch):
+    async def handle(self):
+        return await self._r_tree.traverse(self)
 
 class Server:
 
