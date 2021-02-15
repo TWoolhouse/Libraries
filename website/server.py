@@ -7,10 +7,12 @@ import functools
 import traceback
 import configparser
 import urllib.parse
+from . import log
 from . import error
 from . import buffer
 from path import PATH
 from .buffer import Buffer
+from .config import config
 from interface import Interface
 from http import HTTPStatus as Status
 from ._ssl import context as ssl_context
@@ -29,10 +31,17 @@ class Session:
     def __init__(self, id: str):
         self.id = id
 
+    def __repr__(self):
+        attrs = ", ".join(f"{k}: {v}" for k,v in self.__dict__.items() if not k.startswith("_") and not callable(v))
+        return f"{self.__class__.__qualname__}[{self.id}]<{attrs}>"
+
 class Sessions:
     def __init__(self, new=Session):
         self.__new = new
         self.__container = {}
+
+    def __repr__(self):
+        return f"{self.__class__.__qualname__}<{len(self.__container)}:{self.__new.__qualname__}><>"
 
     def __getitem__(self, key: str) -> Session:
         try:
@@ -302,27 +311,6 @@ class Tree:
             item = Tree(**item)
         self.__tree[key] = item
 
-def config(file: str) -> configparser.ConfigParser:
-    if cfg := config._static.get(file, False):
-        return cfg
-    cfg = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
-    fpath = f"{PATH}resource/config/{file}"
-    cfg.read(fpath)
-    config._static[file] = cfg
-    def write():
-        with open(fpath, "w") as f:
-            cfg.write(f)
-    Interface.terminate.schedule(write)
-    return cfg
-config._static = {}
-@Interface.Repeat
-async def _write_cfg():
-    for p,c in config._static.items():
-        async with Interface.AIOFile(f"{PATH}resource/config/{p}", "w") as f:
-            c.write(f)
-_write_cfg.delay = 60
-_write_cfg()
-
 class RequestBranch(Request, metaclass=__MetaRequestBranch):
     async def handle(self):
         return await self._r_tree.traverse(self)
@@ -344,8 +332,8 @@ class Server:
     async def serve(self):
         try:
             debug.print(f"Opening Server: {self.port}{' && {}'.format(self.ssl) if self.ssl else ''}")
-            self.__server = await asyncio.start_server(self.__create_client, self.host, self.port, backlog=500, start_serving=False)
-            self.__server_ssl = await asyncio.start_server(lambda r, w: self.__create_client(r, w, True), self.host, self.ssl, backlog=500, ssl=ssl_context, start_serving=False) if self.ssl is not None else self.__server
+            self.__server = await asyncio.start_server(self.process_request, self.host, self.port, backlog=500, start_serving=False)
+            self.__server_ssl = await asyncio.start_server(lambda r, w: self.process_request(r, w, True), self.host, self.ssl, backlog=500, ssl=ssl_context, start_serving=False) if self.ssl is not None else self.__server
             async with self.__server, self.__server_ssl:
                 if self.__server_ssl is not self.__server:
                     await self.__server_ssl.start_serving()
@@ -354,7 +342,7 @@ class Server:
         finally:
             self.__open = None
 
-    async def __create_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, ssl=False):
+    async def process_request(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, ssl=False):
         TIMEOUT = 300
         addr = writer.get_extra_info("peername")
         debug.print("Connection:", *addr)
@@ -365,7 +353,7 @@ class Server:
                 # Get First Line of the Request
                 try:
                     request = await asyncio.wait_for(reader.readline(), TIMEOUT)
-                except asyncio.TimeoutError:
+                except (asyncio.TimeoutError, ConnectionError):
                     return writer.close()
                 # print("Request:", *addr, request)
 
@@ -461,6 +449,9 @@ class Server:
                 writer.write(buffer.encode())
                 writer.write(cbuffer)
             except Exception as e:
+                if "client" not in locals():
+                    client = self.client(None, None, None, None, *addr, ssl, None, None, None, HeaderContainer(), None)
+                log.server.error("Connection", client, exc_info=e)
                 print(f"Connection: {addr[0]}:{addr[1]}", "".join(traceback.format_exception(e, e, e.__traceback__)))
             finally:
                 try:
