@@ -30,8 +30,10 @@ class __MetaBitField(type):
         return bin(self._bit_field_int_)[2:]
 
 class BitField(metaclass=__MetaBitField):
-    def __init__(self):
-        pass
+    def __init__(self, **state: bool):
+        for k,v in state.items():
+            getattr(self, k) # To raise error is not found
+            setattr(self, k, bool(v))
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}<{bin(self._bit_field_int_)[2:]}>"
 
