@@ -42,9 +42,14 @@ class Handle(logging.FileHandler):
 
     def format(self, record):
         cli = record.__dict__["client"]
-        record.__dict__["_addr"] = cli.peer
-        record.__dict__["_port"] = cli.port
-        record.__dict__["_ssl"] = "X" if cli.ssl else "O"
+        if cli is None:
+            record.__dict__["_addr"] = "0.0.0.0"
+            record.__dict__["_port"] = "0"
+            record.__dict__["_ssl"] = "O"
+        else:
+            record.__dict__["_addr"] = cli.peer
+            record.__dict__["_port"] = cli.port
+            record.__dict__["_ssl"] = "X" if cli.ssl else "O"
         err = record.exc_info
         record.exc_info = False
         msg = super().format(record)
@@ -53,8 +58,10 @@ class Handle(logging.FileHandler):
             self._trace_handle.emit(record)
         return msg
 
-def page(name: str) -> ClientLogger:
-    return logging.getLogger(f"website.{name}")
+page_loggers = {}
+
+def page(name: str, fmt: str=None) -> ClientLogger:
+    return page_loggers.get(name, create(name, fmt))
 
 def create(name: str, fmt: str=None) -> ClientLogger:
     logging.Logger.manager.setLoggerClass(ClientLogger)
@@ -69,4 +76,7 @@ def create(name: str, fmt: str=None) -> ClientLogger:
     else:
         handle.setFormatter(formatter)
     logger.addHandler(handle)
+    page_loggers[name] = logger
     return logger
+
+create("default")
