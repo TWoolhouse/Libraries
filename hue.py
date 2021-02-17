@@ -16,12 +16,20 @@ def Address(obj) -> str:
             Group: "groups/",
             Scene: "scenes/",
             Schedule: "schedules/",
+            Sensor: "sensors/",
+            Sensor.Info: "sensors/"
         }[obj]
     elif isinstance(obj, BridgeRequest):
         return Address(obj.__class__) + f"{obj.id}/"
 
+def _disif(value, op="") -> str:
+    return op if value is None else value
+def _onoff(value, t="X", f="0") -> str:
+    return t if value else f
+
 class BridgeRequest:
 
+    id = 0
     def __init__(self, bridge: 'Bridge', *params, readonly: set=()):
         self._params = {k: getattr(self.__class__, k) for k in [*params, *readonly]}
         self.bridge = bridge
@@ -119,6 +127,10 @@ class Light(BridgeRequest, metaclass=BridgeIDLookup):
         self.id = id
         self.transition: int = None
 
+    def __repr__(self) -> str:
+        # Light.id[name:on-reachable]<hue saturation brightness temperature colourcycle>
+        return f"{self.__class__.__qualname__}.{self.id}[{_disif(self.name, 'N')}:{_onoff(self.on)}-{_onoff(self.reachable)}]<{_disif(self.hue)}h {_disif(self.saturation)}s {_disif(self.brightness)}b {_disif(self.temperature)}k{'' if self.effect is Status.Effect.NONE else ' CYCLE'}>"
+
     async def _recv(self, data: dict, *params: str) -> dict:
         out = {}
         for attr in params:
@@ -181,6 +193,10 @@ class Group(BridgeRequest, metaclass=BridgeIDLookup):
             async def lmbd(*args, **kwargs):    return
             self._send_req = lmbd
         self.transition: int = None
+
+    def __repr__(self) -> str:
+        # Group.id[name:any-all][lights]<hue saturation brightness temperature colourcycle>
+        return f"{self.__class__.__qualname__}.{self.id}[{_disif(self.name, 'N')}:{_onoff(self.any)}-{_onoff(self.all)}][{' '.join(map(str, (l.id for l in self.lights.values())))}]<{_disif(self.hue)}h {_disif(self.saturation)}s {_disif(self.brightness)}b {_disif(self.temperature)}k{'' if self.effect is Status.Effect.NONE else ' CYCLE'}>"
 
     async def _recv(self, data: dict, *params: str) -> dict:
         out = {}
@@ -271,6 +287,10 @@ class Scene(BridgeRequest, metaclass=BridgeIDLookup):
     def __init__(self, bridge: 'Bridge', id: str):
         super().__init__(bridge, "name", "group", "lights", "states")
         self.id = id
+
+    def __repr__(self) -> str:
+        # Scene.id[name:Group][lights]<DATA>
+        return f"{self.__class__.__qualname__}.{self.id}[{_disif(self.name, 'N')}:{self.group.__class__.__name__}.{self.group.id}][{' '.join(map(str, (l.id for l in self.lights.values())))}]<DATA>"
 
     async def _edited(self, clear=False) -> set:
         for i in self.states.values():
@@ -379,14 +399,22 @@ class Condition:
         self.operator = oper
         self.value = value
 
-    def format(self, bridge: 'Bridge') -> dict:
+    def __repr__(self) -> str:
+        # Condition<address operator value>
+        return f"{self.__class__.__qualname__}<{self.address} {self.operator.name} {_disif(self.value)}>"
+
+    def format(self) -> dict:
         out = {
-            "address": str(self.address),
+            "address": f"/{self.address}",
             "operator": self.operator.value,
         }
         if self.value is not None:
             out["value"] = self.value
         return out
+
+    @classmethod
+    def Parse(cls, cond: dict) -> 'Condition':
+        return cls(cond["address"][1:], cls.Operator(cond["operator"]), cond.get("value", None))
 
 class Command:
 
@@ -401,27 +429,39 @@ class Command:
         self.address = address
         self.method: self.Method = method if isinstance(method, self.Method) else self.Method(method)
 
+    def __repr__(self) -> str:
+        # Condition<method address data>
+        return f"{self.__class__.__qualname__}<{self.method.value} {self.address} {self.body}>"
+
     def format(self, bridge: 'Bridge') -> dict:
+        fmt = self.format_rule()
+        fmt["address"] = f"/api/{bridge.api_key}{fmt['address']}"
+        return fmt
+    def format_rule(self) -> dict:
         return {
-            "address": f"/api/{bridge.api_key}/{self.address}",
+            "address": f"/{self.address}",
             "method": self.method.value,
             "body": self.body
         }
 
     @classmethod
     def Parse(cls, cmd: dict) -> 'Command':
-        return cls(cmd["address"].split("/", 3)[-1], cmd["body"], cmd["method"])
+        return cls(cmd["address"].split("/", 3)[-1] if cmd["address"].startswith("/api") else cmd["address"][1:], cmd["body"], cmd["method"])
 
     @classmethod
     async def Create_light_state(cls, light: Light, **params) -> 'Command':
         data = (await light._send(**params))["state"]
         return cls(Address(light)+"state", data)
     @classmethod
-    async def Create_scene_set(cls, scene: Scene) -> 'Command':
-        return cls(Address(scene.group)+"action", {"scene": scene.id})
-    # @classmethod
-    # async def create_scene_set(cls, scene: Scene) -> 'Command':
-    #     return cls(Address(scene.group)+"action", {"scene": scene.id})
+    async def Create_group_state(cls, group: Group, **params) -> 'Command':
+        data = (await group._send(**params))["action"]
+        return cls(Address(group)+"action", data)
+    @classmethod
+    async def Create_scene_set(cls, scene: Scene, transition: float=None) -> 'Command':
+        body = {"scene": scene.id}
+        if transition is not None:
+            body["transitiontime"] = int(transition * 10)
+        return cls(Address(scene.group)+"action", body)
 
 class Time:
 
@@ -432,6 +472,10 @@ class Time:
             self.random = random
         def _fmt_req(self) -> str:
             return "T" + self.time.strftime(self._FMT) + "" if self.random is None else ("A" + self.random.strftime(self._FMT))
+
+        def __repr__(self) -> str:
+            # Time<format>
+            return f"{self.__class__.__qualname__}<{self._fmt_req()}>"
 
     class Weekly(Time, BitField):
         def __init__(self, time: datetime.time, random: datetime.time=None, mon=False, tue=False, wed=False, thu=False, fri=False, sat=False, sun=False):
@@ -499,7 +543,11 @@ class Schedule(BridgeRequest, metaclass=BridgeIDLookup):
         super().__init__(bridge, "name", "desc", "status", "time", "command")
         self.id = id
         self._cache_time = self.time._fmt_req()
-        self._cache_cmd = json.dumps(self.command.format(self.bridge))
+        self._cache_cmd = self.command.format(self.bridge)
+
+    def __repr__(self) -> str:
+        # Schedule.id[name:status]@time<command>
+        return f"{self.__class__.__qualname__}.{self.id}[{_disif(self.name, 'N')}:{_onoff(self.status)}]@{self.time}<{self.command}>"
 
     @classmethod
     async def Create(cls, bridge: 'Bridge', name: str, time: Time.Time, command: Command, delete=True) -> 'Schedule':
@@ -517,7 +565,7 @@ class Schedule(BridgeRequest, metaclass=BridgeIDLookup):
             raise RuntimeError(f"Failed Creating {cls.__qualname__}: {response}")
         obj.name = name
         obj.command = command
-        obj._cache_cmd = json.dumps(command.format(bridge))
+        obj._cache_cmd = command.format(bridge)
         obj.time = time
         obj._cache_time = time._fmt_req()
         await obj._edited(True)
@@ -525,7 +573,7 @@ class Schedule(BridgeRequest, metaclass=BridgeIDLookup):
 
     async def _edited(self, clear=False) -> set:
         extra = set()
-        if json.dumps(self.command.format(self.bridge)) != self._cache_cmd:
+        if self.command.format(self.bridge) != self._cache_cmd:
              extra.add("command")
         if self.time._fmt_req() != self._cache_time:
              extra.add("time")
@@ -544,12 +592,12 @@ class Schedule(BridgeRequest, metaclass=BridgeIDLookup):
                     out["_cache_time"] = data["localtime"]
                 elif attr == "command":
                     out[attr] = Command.Parse(data[attr])
-                    out["_cache_cmd"] = json.dumps(out[attr].format(self.bridge))
+                    out["_cache_cmd"] = out[attr].format(self.bridge)
                 else:
                     out[attr] = data[attr]
             except KeyError:    continue
             except TypeError:
-                raise RuntimeError(f"Failed Receiving {cls.__qualname__}: {data}")
+                raise RuntimeError(f"Failed Receiving {self.__class__.__qualname__}: {data}")
         return out
 
     async def _send(self, **params) -> dict:
@@ -593,6 +641,10 @@ class Sensor:
             bridge.lookup[Sensor][id] = self
             super().__init__(bridge, "name", "type", "on", *params, readonly={"reachable",})
             self.id = id
+
+        def __repr__(self) -> str:
+            # Sensor.id[name:on-reachable]
+            return f"{self.__class__.__qualname__}.{self.id}[{_disif(self.name, 'N')}:{_onoff(self.on)}-{_onoff(self.reachable)}]"
 
         name: str = "name"
         type: str = "type"
@@ -649,7 +701,7 @@ class Sensor:
                 raise RuntimeError(f"Failed Creating {cls.__qualname__}: {response}")
             obj.name = name
             obj.command = command
-            obj._cache_cmd = json.dumps(command.format(bridge))
+            obj._cache_cmd = command.format(bridge)
             obj.time = time
             obj._cache_time = time._fmt_req()
             await obj._edited(True)
@@ -662,6 +714,9 @@ class Sensor:
         def __init__(self, bridge: 'Bridge', id: int):
             super().__init__(bridge, id, "flag")
 
+        def __repr__(self) -> str:
+            return super().__repr__() + f"<{_onoff(self.flag)}>"
+
         flag: bool = False
 
     class Status(Info):
@@ -671,16 +726,78 @@ class Sensor:
         def __init__(self, bridge: 'Bridge', id: int):
             super().__init__(bridge, id, "status")
 
+        def __repr__(self) -> str:
+            return super().__repr__() + f"<{self.status}>"
+
         status: int = 0
 
     @classmethod
     def Parse(cls, bridge, data: dict) -> type[Union[Info, Flag, Status]]:
         stype = data["type"]
-        lkup = {
-            "flag": cls.Flag,
-            "status": cls.Status,
-        }
+        lkup = {type_._name_i.lower(): type_ for type_ in[cls.Flag, cls.Status]}
         return lkup.get(stype.lower(), cls.Info)
+
+class Rule(BridgeRequest, metaclass=BridgeIDLookup):
+
+    def __init__(self, bridge: 'Bridge', id: int):
+        super().__init__(bridge, "name", "status", "conditions", "actions")
+        self.id = id
+        self._cache_cond = [c.format() for c in self.conditions]
+        self._cache_cmd = [c.format_rule() for c in self.actions]
+
+    def __repr__(self) -> str:
+        # Rule.id[name:status]@time<command>
+        return f"{self.__class__.__qualname__}.{self.id}[{_disif(self.name, 'N')}:{_onoff(self.status)}]<{len(self.conditions)}({' '.join(map(lambda x: x.address, self.conditions))}) {len(self.actions)}({' '.join(map(lambda x: x.address, self.actions))})>"
+
+    async def _edited(self, clear=False) -> set:
+        extra = set()
+        if [c.format_rule() for c in self.actions] != self._cache_cmd:
+             extra.add("actions")
+        if [c.format() for c in self.conditions] != self._cache_cond:
+             extra.add("conditions")
+        return (await super()._edited(clear)) | extra
+
+    async def _recv(self, data: dict, *params: str) -> dict:
+        out = {}
+        for attr in params:
+            try:
+                if attr == "status":
+                    out[attr] = data[attr] == "enabled"
+                elif attr == "actions":
+                    out[attr] = [Command.Parse(c) for c in data[attr]]
+                    out["_cache_cmd"] = [c.format_rule() for c in out[attr]]
+                elif attr == "conditions":
+                    out[attr] = [Condition.Parse(c) for c in data[attr]]
+                    out["_cache_cond"] = [c.format() for c in out[attr]]
+                else:
+                    out[attr] = data[attr]
+            except KeyError:    continue
+            except TypeError:
+                raise RuntimeError(f"Failed Receiving {self.__class__.__qualname__}: {data}")
+        return out
+
+    async def _send(self, **params) -> dict:
+        buffer = {}
+        for key, value in params.items():
+            if key == "actions":
+                buffer[key] = [c.format_rule() for c in value]
+            elif key == "conditions":
+                buffer[key] = [c.format() for c in value]
+            elif key == "status":
+                buffer[key] = "enabled" if value else "disabled"
+            else:
+                buffer[key] = value
+        return buffer
+
+    async def _recv_req(self) -> dict:
+        return await self.bridge.request("GET", f"rules/{self.id}")
+    async def _send_req(self, data: dict):
+        return await self.bridge.request("PUT", f"rules/{self.id}", data)
+
+    name: str = "name"
+    status: bool = True
+    conditions: list[Condition] = []
+    actions: list[Command] = []
 
 class Bridge:
 
@@ -706,11 +823,15 @@ class Bridge:
         self.lookup: dict[type, BridgeRequest] = defaultdict(dict)
         Interface.terminate.schedule(lambda: [c.con.close() for c in self._conns])
 
+    def __repr__(self) -> str:
+        # Bridge[addr:port-requests]<objects>
+        return f"{self.__class__.__qualname__}[{self.addr}:{self.port}-{self._sem._value}]<{' '.join(sorted(map(lambda x: x.__qualname__, self.lookup.keys())))}>"
+
     def __await__(self):
         return self.sync().__await__()
 
     async def sync(self):
-        await Interface.gather(self._load_lights(), self._load_groups(), self._load_scenes(), self._load_schedules())
+        await Interface.gather(self._load_lights(), self._load_groups(), self._load_scenes(), self._load_schedules(), self._load_sensors(), self._load_rules())
 
     async def _get_connection(self) -> __Con:
         await self._sem.acquire()
@@ -758,11 +879,17 @@ class Bridge:
         data = await self.request("GET", "schedules")
         await Interface.gather(*(Schedule(self, int(index)).read(payload) for index, payload in data.items()))
         return self.lookup[Schedule].values()
+    async def _load_sensors(self) -> Iterable[Union[Sensor.Info, Sensor.Flag, Sensor.Status]]:
+        data = await self.request("GET", "sensors")
+        await Interface.gather(*(Sensor.Parse(self, payload)(self, int(index)).read(payload) for index, payload in data.items()))
+        return self.lookup[Schedule].values()
+    async def _load_rules(self) -> Iterable[Rule]:
+        data = await self.request("GET", "rules")
+        await Interface.gather(*(Rule(self, int(index)).read(payload) for index, payload in data.items()))
+        return self.lookup[Rule].values()
 
     async def time_set(self, time=None):
         now = datetime.datetime.utcnow()
         dt = Time.Date(now.date(), now.time())
         fmt = dt._fmt_req()
-        print(fmt)
         res = await self.request("PUT", "config", {"UTC":fmt})
-        print(res)
