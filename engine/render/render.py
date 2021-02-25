@@ -6,7 +6,7 @@ class Render:
 
     def __init__(self, window):
         self._scene = False
-        self.__objects = set()
+        self.__objects: set[Primitive] = set()
         self.__window = window
 
     def scene(self, flag: bool=None):

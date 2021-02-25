@@ -4,6 +4,8 @@ from ..component import Component
 from ..core.transform import Transform
 from ...render.primitive import Primitive
 
+from vector import Vector
+
 from ...core.application import app as Application
 from ... import error
 from ..._settings.render import
@@ -12,12 +14,12 @@ __all__ = ["Render", "RenderMulti", "RenderBatch"]
 
 class Render(Component):
 
-    def __init__(self, primative: Primitive, volatile=False, layer:int=):
+    def __init__(self, primative: Primitive, volatile=False, layer:int=0):
         self._original = primative
         self._drawn = self._original
 
-        self._vol = volatile
-        self._vcache = self._original._volatile() if self._vol else None
+        self._vol: bool = volatile
+        self._vcache: tuple = self._original._volatile() if self._vol else None
 
         self._update = True
 
@@ -25,12 +27,12 @@ class Render(Component):
         self._update = True
 
     def initialize(self):
-        self.transform = self.Get(Transform)
+        self.transform: Transform = self.Get(Transform)
         self._u_transform()
         self._u_drawn_primative()
         self.update()
 
-    def _u_transform(self):
+    def _u_transform(self) -> [Vector, float, Vector]:
         self._global_transform = (self.transform.position_global, self.transform.rotation_global, self.transform.scale_global)
         return self._global_transform
 
@@ -55,8 +57,8 @@ class RenderMulti(Component):
         for c in renders:
             if not isinstance(c, Render):
                 raise error.ecs.ComponentTypeError(c, Render)
-        self.components = renders
-        self.__transform = transform
+        self.components: tuple[Render] = renders
+        self.__transform: Transform = transform
 
     def initialize(self):
         self.__s_app_world = Application().world
@@ -77,7 +79,7 @@ class RenderBatch(Component):
     def __init__(self, *renders: (Render, Transform)):
         _type = True # 0 - Render, 1 - Transform
         comps = []
-        self.__transforms = []
+        self.__transforms: list[Transform] = []
         for c in renders:
             _type = not _type
             if _type:
@@ -92,7 +94,7 @@ class RenderBatch(Component):
             comps.append(c)
         while len(self.__transforms) < len(comps):
             self.__transforms.append(None)
-        self.components = tuple(comps)
+        self.components: tuple[Render] = tuple(comps)
 
     def initialize(self):
         self.__s_app_world = Application().world

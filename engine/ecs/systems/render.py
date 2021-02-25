@@ -12,7 +12,7 @@ class Render(System):
         self.setting = Setting()
         Application().setting.render = lambda: self.setting
 
-    def update(self, app):
+    def update(self, app: 'Application'):
         if app.render._scene:
             for component in self.components(CRender):
                 if component._update or any(i!=j for i,j in zip(component._global_transform, component._u_transform())) or (component._vol and component._volatile()):

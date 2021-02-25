@@ -1,5 +1,6 @@
 import enum
 from collections import defaultdict
+from typing import Callable, T
 
 __all__ = ["Type", "Data", "Mask", "Stack"]
 
@@ -19,7 +20,7 @@ class Type:
         def __repr__(self) -> str:
             return f"{self.name}.{self.value}"
 
-        def __lt__(self, other: "Item") -> bool:
+        def __lt__(self, other: 'Item') -> bool:
             """Sorts based on the value"""
             return self.value < other.value
 
@@ -70,13 +71,13 @@ class Type:
 class Data:
     """Inserted into the Stack"""
 
-    def __init__(self, type: Type.Item, func: callable, active: bool=True):
+    def __init__(self, type: Type.Item, func: Callable[..., T], active: bool=True):
         """Data stores the function and Type.Item that will be inserted into the stack"""
         self.type = type
         self.func = func
         self.active = active
 
-    def __call__(self, *args, **kwargs) -> object:
+    def __call__(self, *args, **kwargs) -> T:
         """Calls the underlying function"""
         return self.func(*args, **kwargs)
 
@@ -108,8 +109,8 @@ class Stack:
         mask: default mask to use when compiling
         """
         self.type = type
-        self.layers = defaultdict(list)
-        self.stack = []
+        self.layers: dict[Type, list[Data]] = defaultdict(list)
+        self.stack: list[Data] = []
         self._mask = self.mask(mask)
 
         for layer in layers:

@@ -1,4 +1,5 @@
 from .._settings import collider, render
+from typing import Callable, T
 
 class Settings:
 
@@ -10,7 +11,7 @@ class Settings:
     def render(self) -> render.Setting:
         pass # Set Callback
 
-    def _callback(self, func):
-        def wrap_settings(*args, **kwargs):
+    def _callback(self, func: Callable[..., T]) -> Callable[..., T]:
+        def wrap_settings(*args, **kwargs) -> T:
             return func(self, *args, **kwargs)
         return wrap_settings

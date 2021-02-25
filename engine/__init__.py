@@ -8,6 +8,7 @@ from . import render
 from . import ecs
 from . import component
 from . import physics
+from . import types
 from .core.application import main, app, instantiate
 
 class __Module(__sys.modules[__name__].__class__):

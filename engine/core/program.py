@@ -6,10 +6,10 @@ class Program:
     def __init__(self):
         pass
 
-    def initialize(self, app: "Application"):
+    def initialize(self, app: 'Application'):
         """Run when the Application starts"""
         pass
 
-    def terminate(self, app: "Application"):
+    def terminate(self, app: 'Application'):
         """Run when the Application stops"""
         pass

@@ -5,10 +5,10 @@ class Component:
     _running = False
     entity = None
 
-    def __init__(self, entity: "Entity"=None):
+    def __init__(self, entity: 'Entity'=None):
         self.entity = entity
 
-    def Get(self, component: "Component") -> "Component":
+    def Get(self, component: 'Component') -> 'Component':
         return self.entity.Get(component)
 
     def initialize(self) -> bool:

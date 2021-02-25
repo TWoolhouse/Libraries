@@ -5,7 +5,8 @@ from .. import error
 from . import layer
 from ..event.event import Event
 
-from ..ecs.core.parent import Parent, Component, Entity
+from ..ecs import Entity, Component, System
+from ..ecs.core.parent import Parent
 from ..ecs.core.transform import Transform
 
 ENTITY_LIMIT = 2 ** 8
@@ -19,12 +20,12 @@ class World:
     def __init__(self):
         # __layer_type__system = layer.Type.new("SystemLayer", PRE=10, SCRIPT=20, PHYSICS=30, RENDER=40, POST=50)
         # __layer_type__event = layer.Type.new("EventLayer", WINDOW=10, UI=20, CONTROL=30)
-        __layer_type__system = layer.Type("SystemLayer", PRE=10, SCRIPT=20, PHYSICS=30, RENDER=40, POST=50)
-        __layer_type__event = layer.Type("EventLayer", WINDOW=10, UI=20, CONTROL=30)
+        __layer_type__system: layer.Type = layer.Type("SystemLayer", PRE=10, SCRIPT=20, PHYSICS=30, RENDER=40, POST=50)
+        __layer_type__event: layer.Type = layer.Type("EventLayer", WINDOW=10, UI=20, CONTROL=30)
 
-        self._entities_null = set()
-        self._entities = {}
-        self._components = defaultdict(set)
+        self._entities_null: set[Entity] = set()
+        self._entities: dict[int, Entity] = {}
+        self._components: dict[type[Component], set[Component]] = defaultdict(set)
         self.systems = layer.Stack(__layer_type__system)
 
         self._script_components = set()
@@ -52,17 +53,17 @@ class World:
     def event(self, event: Event):
         self.events(event)
 
-    def add_system(self, system: "System", type: str="SCRIPT") -> "System":
+    def add_system(self, system: System, type: str="SCRIPT") -> System:
         self.systems.add(layer.Data(getattr(self.systems.type, type), system))
         return system
 
-    def system(self, system: "System", flag: bool=None) -> bool:
+    def system(self, system: System, flag: bool=None) -> bool:
         for layers in self.systems.layers.values():
             for layer in layers:
                 if isinstance(layer.func, system):
                     return self.systems.activate(layer, flag)
 
-    def components(self, type_: "Component", *types: "Component") -> ["Component",]:
+    def components(self, type_: Component, *types: Component) -> [Component,]:
         if types:
             for component in self._components[type_]:
                 try:

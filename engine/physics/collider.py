@@ -2,6 +2,7 @@ import enum
 import functools
 from vector import Vector
 from ..ecs.components.collider import Collider
+from typing import Callable
 
 __all__ = ["detect", "Point", "Plane", "Rectangle", "Circle"]
 
@@ -20,7 +21,7 @@ Circle = Shape.Circle
 def detect(c1: Collider, c2: Collider) -> bool:
     return _d_detect_funcs[c1.shape][c2.shape](c1, c2)
 
-def rside(func) -> callable:
+def rside(func: Callable[[Collider, Collider], bool]) -> Callable[[Collider, Collider], bool]:
     @functools.wraps(func)
     def _rside(c1: Collider, c2: Collider) -> bool:
         return func(c2, c1)

@@ -14,7 +14,7 @@ class Collider(System):
         self.setting = Setting()
         Application().setting.collision = lambda: self.setting
 
-    def update(self, application):
+    def update(self, application: 'Application'):
         colliders = set(self.components(CCollider))
         for c in colliders:
             c.collision.clear()

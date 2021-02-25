@@ -16,18 +16,18 @@ class Transform(Component):
 
     def initialize(self):
         try:
-            self.parent = self.Get(Parent).parent().Get(Transform)
+            self.parent: Transform = self.Get(Parent).parent().Get(Transform)
         except error.ecs.ParentError:
-            self.parent = None
+            self.parent: None = None
 
     @property
-    def position_global(self):
+    def position_global(self) -> Vector:
         return self.parent.position_global + self.position if self.parent else self.position
     @property
-    def rotation_global(self):
+    def rotation_global(self) -> float:
         return self.parent.rotation_global + self.rotation if self.parent else self.rotation
     @property
-    def scale_global(self):
+    def scale_global(self) -> Vector:
         return self.scale.map(self.parent.scale_global) if self.parent else self.scale
 
     def __repr__(self) -> str:

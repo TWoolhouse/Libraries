@@ -10,10 +10,10 @@ class FPS(System):
 
     def __init__(self, buffer: int=10):
         self.size = buffer
-        self.buffer = deque(maxlen=self.size)
-        self.fps = 0
+        self.buffer: deque[float] = deque(maxlen=self.size)
+        self.fps: float = 0.0
 
-    def update(self, app):
+    def update(self, app: 'Application'):
         self.buffer.append(DeltaTime.dt())
         try:
             self.fps = 1 / (sum(self.buffer) / self.size)

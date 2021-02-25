@@ -7,7 +7,7 @@ class Entity:
 
     def __init__(self, *components: Component, id: int=0):
         self._components = components
-        self._component_types = {type(c) : c for c in self._components}
+        self._component_types: dict[type[Component], Component] = {type(c) : c for c in self._components}
         self.id = id
 
     def Get(self, component: Component) -> Component:

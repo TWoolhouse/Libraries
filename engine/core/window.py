@@ -1,18 +1,19 @@
 import tkinter as tk
 from .. import event as Eevent
 from vector import Vector
+from typing import Callable, Any, T
 
 __all__ = ["Window"]
 
-def event(func):
-    def event_binding(event):
+def event(func: Callable[[T], None]) -> Callable[[T], str]:
+    def event_binding(event: T) -> str:
         func(event)
         return "break"
     return event_binding
 
 class Window:
 
-    def __init__(self, callback: callable):
+    def __init__(self, callback: Callable[[Eevent.Event], Any]):
         """Manages the Window
         callback: The function for the event callback
         """
