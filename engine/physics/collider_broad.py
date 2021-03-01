@@ -2,7 +2,11 @@ import enum
 from vector import Vector
 from . import collider as _phys_collider
 from ..ecs.components.collider import Collider
+# from ..core.application import app as Application
+from .._settings.collider import Setting
 from typing import Iterable
+
+__all__ = ["SweepPrune"]
 
 class _SPRef:
     def __init__(self, state: int, collider: Collider, axis: int):
@@ -30,7 +34,7 @@ class SweepPrune:
         self._colliders: dict[Collider, tuple[_SPRef]] = {}
         self._collider_order: list[_SPRef] = []
 
-    def detect(self, *colliders: Collider) -> Iterable[tuple[Collider, Collider]]:
+    def detect(self, mask: dict[int, set[int]], *colliders: Collider) -> Iterable[tuple[Collider, Collider]]:
         colliders: set[Collider] = set(colliders)
         acolliders = self._colliders.keys()
         # Colliders to remove
@@ -56,7 +60,7 @@ class SweepPrune:
             if ref.state: # End
                 active.discard(ref.collider)
             else: # Begin
-                hit.extend(((ref.collider, c) for c in active))
+                hit.extend(((ref.collider, c) for c in active if Masking.collide(mask, ref.collider, c)))
                 active.add(ref.collider)
         return hit
 
@@ -77,7 +81,3 @@ class SweepPrune:
             self._axis = value
             self.clear()
         return self._axis
-
-x = SweepPrune()
-y = x.detect()
-y[0]
