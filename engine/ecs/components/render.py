@@ -8,7 +8,7 @@ from vector import Vector
 
 from ...core.application import app as Application
 from ... import error
-from ..._settings.render import
+from ..._settings.render import Setting
 
 __all__ = ["Render", "RenderMulti", "RenderBatch"]
 
