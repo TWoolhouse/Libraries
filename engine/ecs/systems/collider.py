@@ -2,8 +2,8 @@ from ..system import System
 from ..components.collider import Collider as CCollider
 from ...physics import collider
 from ...core.application import app as Application
-from ...core import layer
 from ..._settings.collider import Setting
+import layer
 
 __all__ = ["Collider"]
 
@@ -18,9 +18,9 @@ class Collider(System):
         colliders = set(self.components(CCollider))
         for c in colliders:
             c.collision.clear()
-        for component in colliders:
-            mask = {j for i in component.layers for j in self.setting.matrix[i]}
-            for other in (c for c in colliders if not ((component in c.collision or c is component) or mask.isdisjoint(c.layers))):
-                if collider.detect(component, other):
-                    component.collision.add(other)
-                    other.collision.add(component)
+        # for component in colliders:
+        #     mask = {j for i in component.layers for j in self.setting.matrix[i]}
+        #     for other in (c for c in colliders if not ((component in c.collision or c is component) or mask.isdisjoint(c.layers))):
+        #         if collider.detect(component, other):
+        #             component.collision.add(other)
+        #             other.collision.add(component)

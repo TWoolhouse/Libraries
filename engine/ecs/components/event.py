@@ -4,7 +4,7 @@ from ...core.application import app as Application
 from typing import Callable
 from ...event import Event as Eevent
 
-from ...core.layer import Data as LayerData
+from layer import Data as LayerData
 
 
 __all__ = ["Event"]

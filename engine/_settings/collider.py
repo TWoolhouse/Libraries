@@ -1,11 +1,10 @@
+import layer
 from collections import defaultdict
 
 class Setting:
     def __init__(self):
-        self.matrix = defaultdict(set, {
-            0: {0,},
-
-        })
+        self.layers = layer.Type("ColliderLayer", )
+        self.matrix = layer.Matrix(self.layers)
 
     def update(self, matrix: dict):
         self.matrix.clear()

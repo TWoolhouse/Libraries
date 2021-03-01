@@ -2,7 +2,7 @@ from collections import defaultdict
 import random
 
 from .. import error
-from . import layer
+import layer
 from ..event.event import Event
 
 from ..ecs import Entity, Component, System
@@ -18,8 +18,6 @@ ENTITY_LIMIT = 2 ** 8
 class World:
 
     def __init__(self):
-        # __layer_type__system = layer.Type.new("SystemLayer", PRE=10, SCRIPT=20, PHYSICS=30, RENDER=40, POST=50)
-        # __layer_type__event = layer.Type.new("EventLayer", WINDOW=10, UI=20, CONTROL=30)
         __layer_type__system: layer.Type = layer.Type("SystemLayer", PRE=10, SCRIPT=20, PHYSICS=30, RENDER=40, POST=50)
         __layer_type__event: layer.Type = layer.Type("EventLayer", WINDOW=10, UI=20, CONTROL=30)
 

@@ -1,7 +1,7 @@
 import sys as __sys
 from vector import Vector
+import layer
 from . import core
-from .core import layer
 from . import event
 from . import input
 from . import render
