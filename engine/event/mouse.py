@@ -5,7 +5,7 @@ from ..input import mouses as imouse, Mouse as IMouse
 __all__ = ["Mouse", "MouseButton", "MousePress", "MouseRelease"]
 
 class Mouse(Event):
-    def __init__(self, button, x: int, y: int):
+    def __init__(self, x: int, y: int):
         super().__init__()
         self.pos: Vector = Vector(x, y)
 
