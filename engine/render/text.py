@@ -47,8 +47,8 @@ class Text(Primitive):
         new.pos = self.pos.rotate(rotation).map(scale) + translate
         return new
 
-    def _volatile(self, other) -> tuple[str, Vector, Colour, str]:
-        return self.text, self.pos, self.colour, self.font.name
+    def _volatile(self) -> tuple[str, Vector, Colour, Font]:
+        return self.text, self.pos, self.colour, self.font
 
     def __repr__(self) -> str:
         return self.text
