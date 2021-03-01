@@ -15,7 +15,12 @@ class Render(System):
     def update(self, app: 'Application'):
         if app.render._scene:
             for component in self.components(CRender):
-                if component._update or any(i!=j for i,j in zip(component._global_transform, component._u_transform())) or (component._vol and component._volatile()):
+                if self.resubmit(component):
                     component._update = False
                     component._u_drawn_primative()
                 app.render.submit(component._drawn)
+
+    def resubmit(self, component: CRender) -> bool:
+        return component._update or \
+            any(i!=j for i,j in zip(component._global_transform, component._u_transform())) or \
+            (component._vol and component._volatile())
