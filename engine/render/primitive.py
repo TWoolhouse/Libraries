@@ -18,12 +18,12 @@ class Primitive:
     def render(self, canvas):
         raise error.render.PrimitiveError(self, "Can not be Rendered") from None
 
-    def Transform(self, translate: Vector=Vector(0, 0), rotation: float=0.0, scale: Vector=Vector(1, 1)):
+    def Transform(self, translate: Vector=Vector(0, 0), rotation: float=0.0, scale: Vector=Vector(1, 1)) -> 'Primative':
         raise error.render.PrimitiveError(self, "Can not Transform") from None
 
-    def _volatile(self, other) -> bool:
+    def _volatile(self) -> tuple[bool]:
         """Equality Operation"""
-        return False
+        return (False,)
 
     def __str__(self) -> str:
         string = self.__repr__()

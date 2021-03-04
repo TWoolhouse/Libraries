@@ -1,15 +1,17 @@
 from ..entity import Entity
 from ..component import Component
 from ...core.application import app as Application
+from typing import Callable
+from ...event import Event as Eevent
 
-from ...core.layer import Data as LayerData
+from layer import Data as LayerData
 
 
 __all__ = ["Event"]
 
 class Event(Component):
 
-    def __init__(self, func: callable, type: str="CONTROL", enabled: bool=True):
+    def __init__(self, func: Callable[[Eevent], None], type: str="CONTROL", enabled: bool=True):
         self.__func, self.__type, self.__enabled = func, type, enabled
 
     def initialize(self):
@@ -22,7 +24,7 @@ class Event(Component):
         self.__world.events.remove(self.layer_data)
         self.__world.events.compile()
 
-    def func(self, func: callable):
+    def func(self, func: Callable[[Eevent], None]):
         try:
             self.layer_data.func = func
         except AttributeError:

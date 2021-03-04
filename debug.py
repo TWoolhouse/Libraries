@@ -29,6 +29,19 @@ class cfg:
             file = open(file, "wb")
         self._output_stream = file
 
+class time_read:
+    def __init__(self, func):
+        self._func = func
+    def total(self) -> float:
+        return self._func._debug_time
+    def count(self) -> int:
+        return self._func._debug_count
+    def time(self) -> float:
+        return self._func._debug_time / self._func._debug_count
+    def reset(self):
+        self._func._debug_time = 0.0
+        self._func._debug_count = 0
+
 cfg = cfg()
 
 def enable():
@@ -71,8 +84,11 @@ def enable():
             start = __time.time()
             res = func(*args, **kwargs)
             end = __time.time()
-            print(end - start)
+            debug_time._debug_time += end - start
+            debug_time._debug_count += 1
             return res
+        debug_time._debug_time = 0.0
+        debug_time._debug_count = 0
         return debug_time
 
     # Catch Error and Output Input

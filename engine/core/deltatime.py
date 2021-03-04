@@ -14,22 +14,22 @@ class DeltaTime:
     __debt = __value
 
     @classmethod
-    def value(cls):
+    def value(cls) -> float:
         """Time between this frame and the last"""
         return cls.__value
     @classmethod
-    def physics(cls):
+    def physics(cls) -> float:
         """A fixed value
         Denotes the time for each physics update
         """
         return cls.__physics
     @classmethod
-    def time(cls):
+    def time(cls) -> float:
         """Returns the current time in ms"""
         return cls.__now
 
     @classmethod
-    def _next(cls):
+    def _next(cls) -> float:
         """Called once per frame to calculate the frame time"""
         cls.__old = cls.__new
         cls.__new = time.time()

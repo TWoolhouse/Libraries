@@ -1,5 +1,6 @@
 import enum
 from collections import defaultdict
+from typing import Callable, T as _T
 
 __all__ = ["Type", "Data", "Mask", "Stack"]
 
@@ -7,7 +8,7 @@ class Type:
     """Layer Type is a collection of identifiers for Layer Type Items"""
 
     class Item:
-        """The individual Items that are used as a label to group elements in the Layer Stack"""
+        """The individual Items that are used as a label to group elements in the Layer Stack/Matrix"""
         def __init__(self, name: str, value: int):
             """Should not be created by the user
             name: The name used to access through the type
@@ -16,10 +17,13 @@ class Type:
             self.name = name
             self.value = value
 
+        def __hash__(self) -> int:
+            return self.value
+
         def __repr__(self) -> str:
             return f"{self.name}.{self.value}"
 
-        def __lt__(self, other: "Item") -> bool:
+        def __lt__(self, other: 'Item') -> bool:
             """Sorts based on the value"""
             return self.value < other.value
 
@@ -31,6 +35,12 @@ class Type:
         self._name = name
         self.__items = {"NONE": self.__class__.Item("NONE", 0), **{k.upper(): self.__class__.Item(k.upper(), v) for k,v in objs.items() if not k.startswith("_")}}
         self.__ord_items = sorted(self.__items.values())
+
+    def get(self, key: str) -> Item:
+        return self[key]
+    def set(self, key: str, value: int) -> Item:
+        self[key] = value
+        return self[key]
 
     def __getitem__(self, key: str) -> Item:
         return self.__items[key.upper()]
@@ -60,23 +70,24 @@ class Type:
         return item
 
     def __getattribute__(self, key: str) -> Item:
-        if key.startswith("_"):
+        try:
             return super().__getattribute__(key)
-        return self.__items[key.upper()]
+        except AttributeError:
+            return self.__items[key.upper()]
 
     def __repr__(self) -> str:
-        return f"{self._name}"
+        return f"LayerType<{self._name}>"
 
 class Data:
     """Inserted into the Stack"""
 
-    def __init__(self, type: Type.Item, func: callable, active: bool=True):
+    def __init__(self, type: Type.Item, func: Callable[..., _T], active: bool=True):
         """Data stores the function and Type.Item that will be inserted into the stack"""
         self.type = type
         self.func = func
         self.active = active
 
-    def __call__(self, *args, **kwargs) -> object:
+    def __call__(self, *args, **kwargs) -> _T:
         """Calls the underlying function"""
         return self.func(*args, **kwargs)
 
@@ -88,7 +99,7 @@ class Data:
         return f"LayerData<{self.type}-{self.active} Func:{name}>"
 
 class Mask:
-    """Enables and Disables Type.Items when passed to the Stack"""
+    """Enables and Disables Type.Items when passed to a Stack/Matrix"""
 
     def __init__(self, *types: Type.Item, invert: bool=False):
         """Will make only those in 'types' active.
@@ -108,8 +119,8 @@ class Stack:
         mask: default mask to use when compiling
         """
         self.type = type
-        self.layers = defaultdict(list)
-        self.stack = []
+        self.layers: dict[Type, list[Data]] = defaultdict(list)
+        self.stack: list[Data] = []
         self._mask = self.mask(mask)
 
         for layer in layers:
@@ -136,7 +147,7 @@ class Stack:
         """
         try:
             self.layers[layer.type].remove(layer)
-        except ValueError:    print(self, layer) # REMOVE
+        except ValueError:    return layer
         return layer
 
     def compile(self, mask: Mask=True):
@@ -172,3 +183,59 @@ class Stack:
 
     def __repr__(self) -> str:
         return "LayerStack<{}[{}] {}>".format(self.type.__name__, len(self.stack), ", ".join(f"{k.name}:{len(v)}" for k,v in self.layers.items()))
+
+class Matrix:
+
+    def __init__(self, type: Type, mask: Mask=None):
+        self.type = type
+        self.form: dict[Type.Item, set[Type.Item]] = defaultdict(set)
+        self.matrix: dict[Type.Item, set[Type.Item]] = defaultdict(set)
+        self._mask = self.mask(mask)
+
+    def mask(self, mask: Mask=None) -> Mask:
+        """Update the Mask
+        if 'mask' is None then enable all Type.Items"""
+        if mask is None:
+            self._mask = Mask(self.type.NONE, invert=True)
+        else:
+            self._mask = mask
+        return self._mask
+
+    def make(self, row: Type.Item, *items: Type.Item):
+        """Create Single Row of interaction"""
+        self.form[row] = set(items)
+    def add(self, row: Type.Item, item: Type.Item):
+        """Add item to row layer"""
+        self.form[row].add(item)
+    def remove(self, row: Type.Item, item: Type.Item):
+        """Remove item from row"""
+        self.form[row].discard(item)
+    def clear(self):
+        """Empty the entire matrix"""
+        self.form.clear()
+    def empty(self, row: Type.Item):
+        """Clear row"""
+        del self.form[row]
+    def update(self, rows: dict[Type.Item, set[Type.Item]]):
+        """Set all rows"""
+        self.form.update(rows)
+
+    def compile(self, mask: Mask=True):
+        """Compile the Matrix
+        if mask is anything but 'True', it will be passed into Matrix.mask
+        """
+        self.matrix.clear()
+        if mask != True:
+            self.mask(mask)
+        for row, items in tuple(self.form.items()):
+            s = self.matrix[row]
+            for i in items:
+                if (i in self._mask.types) != self._mask.invert:
+                    s.add(i)
+                    self.matrix[i].add(row)
+
+    def __iter__(self):
+        return self.matrix.values().__iter__()
+
+    def within(self, a: set[Type.Item], b: set[Type.Item]) -> bool:
+        return any(not self.matrix[i].isdisjoint(a) for i in b)

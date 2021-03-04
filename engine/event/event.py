@@ -1,3 +1,5 @@
+from typing import Union, Callable, T
+
 __all__ = ["Event"]
 
 class _Event(type):
@@ -19,7 +21,7 @@ class Event(metaclass=_Event):
     def __repr__(self):
         return ""
 
-    def dispatch(self, event, func=False):
+    def dispatch(self, event: T, func: Union[Callable[[T], bool], bool]=False):
         if self.handled:
             return False
         if isinstance(func, bool):

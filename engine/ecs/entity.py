@@ -7,7 +7,7 @@ class Entity:
 
     def __init__(self, *components: Component, id: int=0):
         self._components = components
-        self._component_types = {type(c) : c for c in self._components}
+        self._component_types: dict[type[Component], Component] = {type(c) : c for c in self._components}
         self.id = id
 
     def Get(self, component: Component) -> Component:
@@ -21,9 +21,12 @@ class Entity:
             if component._running:
                 continue
             component.entity = self
-            if res := component.initialize():
-                raise error.ecs.InitializeComponent(self, component, res)
-            component._running = True
+            try:
+                if res := component.initialize():
+                    raise error.ecs.InitializeComponent(self, component, res)
+                component._running = True
+            except Exception as e:
+                raise error.ecs.InitializeComponent(self, component, e) from e
         return True
 
     def terminate(self) -> bool:

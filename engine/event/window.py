@@ -10,7 +10,7 @@ class WindowClose(Window):
 
 class WindowResize(Window):
 
-    def __init__(self, width, height):
+    def __init__(self, width: int, height: int):
         super().__init__()
         self.width, self.height = width, height
 

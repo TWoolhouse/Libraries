@@ -1,24 +1,27 @@
 import tkinter as tk
 from .. import event as Eevent
+from vector import Vector
+from typing import Callable, Any, T
 
 __all__ = ["Window"]
 
-def event(func):
-    def event_binding(event):
+def event(func: Callable[[T], None]) -> Callable[[T], str]:
+    def event_binding(event: T) -> str:
         func(event)
         return "break"
     return event_binding
 
 class Window:
 
-    def __init__(self, callback: callable):
+    def __init__(self, callback: Callable[[Eevent.Event], Any]):
         """Manages the Window
         callback: The function for the event callback
         """
         self.callback = callback
         self._master = tk.Tk()
         self._master.protocol("WM_DELETE_WINDOW", self.__destroy)
-        self._canvas = tk.Canvas(self._master, width=1280, height=720, bd=-2)
+        self.__size = Vector(1280, 720)
+        self._canvas = tk.Canvas(self._master, width=self.__size[0], height=self.__size[1], bd=-2)
         self._canvas.pack(fill="both", expand=True)
         self.__bind()
 
@@ -48,9 +51,10 @@ class Window:
 
         def resize(event):
             self._canvas.configure(width=event.width, height=event.height)
+            # print(event.width, event.height, self._canvas.xview(), self._canvas.yview())
+            # self._canvas.configure(width=event.width, height=event.height, scrollregion=(-event.width, -event.height, event.width, event.height))
             # self._canvas.xview_moveto(.5)
             # self._canvas.yview_moveto(.5)
-            # self._canvas.configure(width=event.width, height=event.height, scrollregion=(-event.width, -event.height, event.width, event.height))
             self.callback(Eevent.WindowResize(event.width, event.height))
             # print(self._canvas.xview(), self._canvas.yview(), event.width, event.height)
         self._master.bind("<Configure>", event(resize), add=True)
@@ -65,3 +69,18 @@ class Window:
             self._master.title(name)
             return name
         return self._master.title
+
+    @property
+    def size(self) -> Vector:
+        return self.__size
+    @property
+    def width(self) -> int:
+        return self.__size[0]
+    @property
+    def height(self) -> int:
+        return self.__size[1]
+
+    @size.setter
+    def size(self, vec: Vector):
+        self.__size = vec.int()
+        self._canvas.configure(width=self.__size[0], height=self.__size[1])
