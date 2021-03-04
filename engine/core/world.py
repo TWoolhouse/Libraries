@@ -9,6 +9,8 @@ from ..ecs import Entity, Component, System
 from ..ecs.core.parent import Parent
 from ..ecs.core.transform import Transform
 
+from typing import Iterator
+
 ENTITY_LIMIT = 2 ** 8
 # 255 Limit
 # 0 is reserved for:
@@ -61,7 +63,7 @@ class World:
                 if isinstance(layer.func, system):
                     return self.systems.activate(layer, flag)
 
-    def components(self, type_: Component, *types: Component) -> [Component,]:
+    def components(self, type_: Component, *types: Component) -> Iterator[Component]:
         if types:
             for component in self._components[type_]:
                 try:
