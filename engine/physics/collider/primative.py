@@ -1,7 +1,7 @@
 import enum
 import functools
 from vector import Vector
-from ..ecs.components.collider import Collider
+from ...ecs.components.collider import Collider
 from typing import Callable
 
 __all__ = ["detect", "Point", "Plane", "Rectangle", "Circle"]

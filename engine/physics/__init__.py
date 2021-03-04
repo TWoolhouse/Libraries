@@ -1,1 +1,1 @@
-from . import collider, collider_broad
+from . import collider

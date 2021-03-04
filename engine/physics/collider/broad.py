@@ -1,10 +1,7 @@
-import enum
-from vector import Vector
-from . import collider as _phys_collider
-from ..ecs.components.collider import Collider
-# from ..core.application import app as Application
-from .._settings.collider import Setting
+import layer
 from typing import Iterable
+from ..._settings.collider import Setting
+from ...ecs.components.collider import Collider
 
 __all__ = ["SweepPrune"]
 
@@ -19,7 +16,7 @@ class _SPRef:
     def value(self) -> float:
         if self._value is None:
             # Should work for collider types: Point, Rect, Circle
-            self._value = self.collider.transform.position_global[self.axis] + (-self.collider.transform.scale_global[self.axis] if self.state else self.collider.transform.scale_global[self.axis])
+            self._value = self.collider.transform.position_global[self.axis] + (self.collider.transform.scale_global[self.axis] if self.state else -self.collider.transform.scale_global[self.axis])
         return self._value
 
     def __lt__(self, other: '_SPRef') -> bool:
@@ -34,8 +31,7 @@ class SweepPrune:
         self._colliders: dict[Collider, tuple[_SPRef]] = {}
         self._collider_order: list[_SPRef] = []
 
-    def detect(self, mask: dict[int, set[int]], *colliders: Collider) -> Iterable[tuple[Collider, Collider]]:
-        colliders: set[Collider] = set(colliders)
+    def detect(self, layers: layer.Matrix, colliders: set[Collider]) -> Iterable[tuple[Collider, Collider]]:
         acolliders = self._colliders.keys()
         # Colliders to remove
         for c in acolliders - colliders:
@@ -60,7 +56,7 @@ class SweepPrune:
             if ref.state: # End
                 active.discard(ref.collider)
             else: # Begin
-                hit.extend(((ref.collider, c) for c in active if Masking.collide(mask, ref.collider, c)))
+                hit.extend(((ref.collider, c) for c in active if layers.within(ref.collider.layers, c.layers)))
                 active.add(ref.collider)
         return hit
 
