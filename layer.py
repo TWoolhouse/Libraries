@@ -70,9 +70,10 @@ class Type:
         return item
 
     def __getattribute__(self, key: str) -> Item:
-        if key.startswith("_"):
+        try:
             return super().__getattribute__(key)
-        return self.__items[key.upper()]
+        except AttributeError:
+            return self.__items[key.upper()]
 
     def __repr__(self) -> str:
         return f"LayerType<{self._name}>"
@@ -201,16 +202,22 @@ class Matrix:
         return self._mask
 
     def make(self, row: Type.Item, *items: Type.Item):
+        """Create Single Row of interaction"""
         self.form[row] = set(items)
     def add(self, row: Type.Item, item: Type.Item):
+        """Add item to row layer"""
         self.form[row].add(item)
     def remove(self, row: Type.Item, item: Type.Item):
+        """Remove item from row"""
         self.form[row].discard(item)
     def clear(self):
+        """Empty the entire matrix"""
         self.form.clear()
     def empty(self, row: Type.Item):
+        """Clear row"""
         del self.form[row]
     def update(self, rows: dict[Type.Item, set[Type.Item]]):
+        """Set all rows"""
         self.form.update(rows)
 
     def compile(self, mask: Mask=True):
@@ -232,16 +239,3 @@ class Matrix:
 
     def within(self, a: set[Type.Item], b: set[Type.Item]) -> bool:
         return any(not self.matrix[i].isdisjoint(a) for i in b)
-
-t = Type("Test", a=1, b=2, c=3)
-m = Matrix(t)
-m.update({
-    t["a"]: {t["a"], t["b"]},
-    t["b"]: {t["a"], t["b"], t["c"]},
-})
-m.compile()
-o = m.within(
-    {t["a"], t["b"]},
-    {t["a"], t["b"], t["c"]}
-)
-print(t, m, o)
