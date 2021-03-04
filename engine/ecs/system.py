@@ -1,4 +1,5 @@
 from .component import Component
+from typing import Iterator
 
 class System:
 
@@ -12,5 +13,5 @@ class System:
     def update(self, application: 'Application'):
         pass
 
-    def components(self, type: Component, *types: Component) -> [Component,]:
+    def components(self, type: Component, *types: Component) -> Iterator[Component]:
         return self.__app.world.components(type, *types)
