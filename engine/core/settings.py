@@ -1,15 +1,15 @@
 from .._settings import collider, render
 from typing import Callable, T
-
+from ..error import SettingError
 class Settings:
 
     def __init__(self):
         pass
 
     def collision(self) -> collider.Setting:
-        pass # Set Callback
+        raise SettingError(self.collision.__qualname__, "Not Instatiated")
     def render(self) -> render.Setting:
-        pass # Set Callback
+        raise SettingError(self.render.__qualname__, "Not Instatiated")
 
     def _callback(self, func: Callable[..., T]) -> Callable[..., T]:
         def wrap_settings(*args, **kwargs) -> T:

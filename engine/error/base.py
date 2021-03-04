@@ -16,3 +16,12 @@ class EventError(EngineError):
     pass
 class ECSError(EngineError):
     pass
+
+class SettingError(EngineError):
+
+    def __init__(self, setting: str, msg: str):
+        super().__init__(msg)
+        self.setting = setting
+
+    def __str__(self) -> str:
+        return f"{self.setting} {super().__str__()}"
