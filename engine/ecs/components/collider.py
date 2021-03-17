@@ -1,4 +1,5 @@
 import layer
+from typing import Union
 from ..entity import Entity
 from ..component import Component
 from ..core.transform import Transform
@@ -8,10 +9,11 @@ __all__ = ["Collider"]
 
 class Collider(Component):
 
-    def __init__(self, shape: 'physics.colldier.Shape', transform: Transform, *layers: layer.Type):
+    def __init__(self, shape: 'physics.colldier.Shape', transform: Transform, *layers: Union[layer.Type.Item, str]):
         self.shape = shape
         self.transform = transform
-        self.layers: set[layer.Type] = set(layers)
+        lyrs = Application().setting.collision().layers
+        self.layers: set[layer.Type] = set(l if isinstance(l, layer.Type.Item) else lyrs[l] for l in layers)
         self.collision: set[Collider] = set()
 
     def initialize(self):

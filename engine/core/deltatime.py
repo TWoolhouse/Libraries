@@ -12,6 +12,7 @@ class DeltaTime:
     __old = 0.0
     __new = 0.0
     __debt = __value
+    __max_frame_debt = 1.0
 
     @classmethod
     def value(cls) -> float:
@@ -51,7 +52,7 @@ class DeltaTime:
         Only called once per frame/update cycle
         """
         if cls.__debt < 0: # Cap the debt to never go below 0
-            time.sleep(abs(cls.__debt)) # Pause for the debt so we don't run ahead
+            time.sleep(-cls.__debt) # Pause for the debt so we don't run ahead
             cls.__debt = 0
         cls._next() # Update the internal values
 
@@ -60,8 +61,8 @@ class DeltaTime:
         # This means we now have enough time to render
         cls.__debt += cls.__value - cls.__physics
 
-        # Cap the debt to 1 so we don't run into never being able to render as the debt is too large
-        if cls.__debt > 1:
+        # Cap the debt so we don't run into never being able to render as the debt is too large
+        if cls.__debt > cls.__max_frame_debt:
             cls.__debt = 0
 
         # Render if we have enough debt (includes if we overran)

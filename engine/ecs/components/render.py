@@ -9,12 +9,14 @@ from vector import Vector
 from ...core.application import app as Application
 from ... import error
 from ..._settings.render import Setting
+import layer
+from typing import Union
 
 __all__ = ["Render", "RenderMulti", "RenderBatch"]
 
 class Render(Component):
 
-    def __init__(self, primative: Primitive, volatile=False, layer:int=0):
+    def __init__(self, primative: Primitive, volatile=False, layer: Union[layer.Type.Item, str]="MAIN"):
         self._original = primative
         self._drawn = self._original
 
@@ -22,6 +24,8 @@ class Render(Component):
         self._vcache: tuple = self._original._volatile() if self._vol else None
 
         self._update = True
+
+        self.layer = Application().setting.render().layers[layer] if isinstance(layer, str) else layer
 
     def update(self):
         self._update = True
