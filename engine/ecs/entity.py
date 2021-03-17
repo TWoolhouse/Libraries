@@ -8,6 +8,8 @@ class Entity:
     def __init__(self, *components: Component, id: int=0):
         self._components = components
         self._component_types: dict[type[Component], Component] = {type(c) : c for c in self._components}
+        if missing := set().union(*(c._required_components for c in self._components)).difference(*(c.mro() for c in self._component_types)):
+            raise TypeError
         self.id = id
 
     def Get(self, component: Component) -> Component:
