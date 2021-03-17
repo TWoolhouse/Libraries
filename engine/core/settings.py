@@ -1,6 +1,7 @@
-from .._settings import collider, render
+from .._settings import collider, render as renderer
 from typing import Callable, T
 from ..error import SettingError
+
 class Settings:
 
     def __init__(self):
@@ -8,7 +9,7 @@ class Settings:
 
     def collision(self) -> collider.Setting:
         raise SettingError(self.collision.__qualname__, "Not Instatiated")
-    def render(self) -> render.Setting:
+    def render(self) -> renderer.Setting:
         raise SettingError(self.render.__qualname__, "Not Instatiated")
 
     def _callback(self, func: Callable[..., T]) -> Callable[..., T]:
