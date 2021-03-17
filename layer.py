@@ -33,7 +33,7 @@ class Type:
         Items are accessed as memeber variables of this object.
         """
         self._name = name
-        self.__items = {"NONE": self.__class__.Item("NONE", 0), **{k.upper(): self.__class__.Item(k.upper(), v) for k,v in objs.items() if not k.startswith("_")}}
+        self.__items = {"NONE": self.__class__.Item("NONE", 0), **{k.upper(): self.__class__.Item(k.upper(), v) for k,v in objs.items()}}
         self.__ord_items = sorted(self.__items.values())
 
     def get(self, key: str) -> Item:
@@ -41,6 +41,9 @@ class Type:
     def set(self, key: str, value: int) -> Item:
         self[key] = value
         return self[key]
+
+    def generate(self, **pairs: int):
+        self.__items |= {k.upper(): self.__class__.Item(k.upper(), v) for k,v in pairs.items()}
 
     def __getitem__(self, key: str) -> Item:
         return self.__items[key.upper()]
@@ -183,6 +186,42 @@ class Stack:
 
     def __repr__(self) -> str:
         return "LayerStack<{}[{}] {}>".format(self.type.__name__, len(self.stack), ", ".join(f"{k.name}:{len(v)}" for k,v in self.layers.items()))
+
+class StackQ(Stack):
+
+    def __init__(self, type: Type, *layers: Data, mask: Mask=None):
+        super().__init__(type, *layers, mask=mask)
+        self.layers: dict[Type.Item, Data] = {layer.type: layer for layer in layers}
+
+    def add(self, layer: Data) -> Data:
+        self.layers[layer.type] = layer
+        return layer
+    def remove(self, type: Type.Item) -> Data:
+        return self.layers.pop(type)
+
+    def __getitem__(self, key: Type.Item) -> Data:
+        return self.layers[key]
+
+    def compile(self, mask: Mask=True):
+        """Compile the Stack
+        if mask is anything but 'True', it will be passed into Stack.mask
+        """
+        self.stack.clear()
+        if mask != True:
+            self.mask(mask)
+        for t,layer in self.layers.items():
+            if (t in self._mask.types) != self._mask.invert and layer.active:
+                self.stack.append(layer)
+
+    def activate(self, type: Type.Item, flag: bool=None) -> bool:
+        """Toggle the active status of a specific layer
+        Does NOT compile the Stack
+        """
+        return super().activate(self.layers[type], flag)
+
+    def __repr__(self) -> str:
+        return "LayerStackQ<{}[{}] {}>".format(self.type.__name__, len(self.stack), ", ".join(f"{k.name}:{'X' if v.active else 'O'}" for k,v in self.layers.items()))
+
 
 class Matrix:
 
