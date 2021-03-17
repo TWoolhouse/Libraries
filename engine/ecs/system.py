@@ -1,5 +1,7 @@
 from .component import Component
-from typing import Iterator
+from typing import Type, TypeVar, Iterator, overload
+
+C = TypeVar("C", bound=Component)
 
 class System:
 
@@ -13,5 +15,10 @@ class System:
     def update(self, application: 'Application'):
         pass
 
-    def components(self, type: Component, *types: Component) -> Iterator[Component]:
+    @overload
+    def components(self, type: Type[C]) -> Iterator[C]: ...
+    @overload
+    def components(self, type: Type[C], *types: Type[C]) -> Iterator[tuple[C]]: ...
+
+    def components(self, type: Type[C], *types: Type[C]) -> Iterator[C]:
         return self.__app.world.components(type, *types)
