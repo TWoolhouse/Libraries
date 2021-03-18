@@ -1,4 +1,4 @@
-import .neuron
-import .layout
+from . import neuron
+from . import layout
 from .network import Network
-import .algorithm
+from . import algorithm

@@ -2,7 +2,7 @@ from .neuron import N as Neuron
 
 class Layout:
     """A specification for the network.
-    It tells the netowkr how to link all the neurons togeather and what type they should be."""
+    It tells the network how to link all the neurons togeather and what type they should be."""
 
     def __init__(self, input: tuple[int], output: tuple[int], neurons: tuple[tuple[int, tuple[int], type[Neuron]]]):
         self.inputs, self.outputs = input, output # Index of input and output neurons
