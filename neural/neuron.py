@@ -1,4 +1,5 @@
 from .maths import sigmoid as _sigmoid
+from typing import TypeVar
 
 class Neuron:
 
@@ -25,12 +26,12 @@ class Neuron:
     def __hash__(self) -> int:
         return id(self)
 
-    def __getstate__(self) -> tuple:
-        return self.id, self.bias, self._connections
-    def __setstate__(self, data: tuple):
+    def __getstate__(self) -> tuple[int, float, dict[int, float]]:
+        return self.id, self.bias, {n.id: v for n,v in self._connections.items()}
+    def __setstate__(self, data: tuple[int, float, dict[int, float]]):
         self.id, self.bias, self._connections = data
-        self._value = None
 
+N = TypeVar("N", bound=Neuron)
 Hidden = Neuron
 
 class Input(Neuron):
@@ -54,3 +55,13 @@ class Recurrent(Neuron):
             sum(neuron.value() * weight for neuron, weight in self._connections.values())
             + self.bias
         )
+
+    def __getstate__(self) -> tuple[int, float, dict[int, float], tuple[float, float]]:
+        id, bias, cons = super().__getstate__()
+        del cons[-self.id]
+        return id, bias, cons, (self.previous.bias, self._connections[self.previous])
+
+    def __setstate__(self, data: tuple[int, float, dict[int, float], tuple[float, float]]):
+        super().__setstate__(data[:-1])
+        self.previous = Input(-self.id, data[-1][0], 0.0)
+        self._connections[self.previous] = data[-1][1]
