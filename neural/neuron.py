@@ -50,12 +50,6 @@ class Recurrent(Neuron):
         self.previous.set(self._value)
         super()._clear()
 
-    def _calc(self) -> float:
-        return _sigmoid(
-            sum(neuron.value() * weight for neuron, weight in self._connections.values())
-            + self.bias
-        )
-
     def __getstate__(self) -> tuple[int, float, dict[int, float], tuple[float, float]]:
         id, bias, cons = super().__getstate__()
         del cons[-self.id]
