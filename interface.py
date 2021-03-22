@@ -191,7 +191,7 @@ class Interface:
                 self.__done.set()
                 self.__event = True
 
-                Interface.schedule(self.__main())
+                Interface.schedulc(self.__main())
 
             def __await__(self):
                 return self.__done.wait().__await__()
