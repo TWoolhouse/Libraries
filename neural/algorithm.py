@@ -1,46 +1,52 @@
-from neural.network import Network
-
+from ._network import Network
 import random
+from typing import Iterator
 
 class Algorithm:
     def __init__(self, network: Network):
-        self.network = network
+        self.network: Network = network
 
 class Genetic(Algorithm):
-    def __init__(self, network: Network):
+
+    def __init__(self, network: Network, population: int, probability: float, weight: float=1.0):
         super().__init__(network)
-        self._pop = [[self.network, None]]
-        self._iter = None
+        self.population_size: int = population
+        self._active_population = {}
+        self._probability, self._weight = probability, weight
 
-    def train(self, population: int, magnitude: float=1, probability: float=1) -> iter:
-        self._pop = [[self.mutate(self.network.copy(), magnitude, probability), None] for i in range(population)]
-        self._pop.insert(0, [self.network, None])
-        self._iter = self.population()
-        return self._iter
+    def population(self) -> Iterator[Network]:
+        """Create / Retrieve the next generation population"""
+        if self._active_population:
+            return iter(self._active_population)
+        self._active_population = {self.mutate(self.network.copy()): None for _ in range(self.population_size-1)}
+        self._active_population[self.network] = None
+        return iter(self._active_population)
 
-    def population(self) -> iter:
-        for net in self._pop:
-            fitness = yield net[0]
-            if fitness is not None:
-                net[1] = fitness
-                yield
-        self._iter = None
+    def fitness(self, network: Network, value):
+        if network in self._active_population:
+            self._active_population[network] = value
+            return value
+        raise KeyError("Network not in Algorithm")
 
-    def fitness(self, value):
-        self._iter.send(value)
-
-    def mutate(self, network: Network, magnitude: float=1, probability: float=1) -> Network:
-        mag = magnitude * 2
+    def mutate(self, network: Network) -> Network:
+        """Takes network and mutates it by changing weights and biases of all the nodes."""
         for neuron in network._neurons:
-            if random.random() <= probability:
-                neuron.bias += (random.random() - 0.5) * mag
-            for conn in neuron._connections.values():
-                if random.random() <= probability:
-                    conn[1] += (random.random() - 0.5) * mag
+            if random.random() <= self._probability:
+                neuron.bias += (random.random() - 0.5) * self._weight
+            for conn in neuron._connections:
+                if random.random() <= self._probability:
+                    neuron._connections[conn] += (random.random() - 0.5) * self._weight
         return network
 
-    def merge(self):
-        self.network = max((i for i in self._pop if i[1] is not None), key=lambda x: x[1])[0]
-        self._pop = [self.network, None]
+    def merge(self, all=True):
+        """Merge the networks togeather based on the highest fitness"""
+        if all:
+            def max_key(kv):
+                if kv[1] is None:
+                    raise ValueError("Not all networks have a fitness")
+                return kv[1]
+        else:
+            max_key = lambda kv: kv[1]
+        self.network: Network = max(self._active_population.items(), key=max_key)[0]
+        self._active_population.clear()
         return self.network
-

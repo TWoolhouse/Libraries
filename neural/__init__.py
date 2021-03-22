@@ -1,5 +1,4 @@
-# from neural.neuron import Neuron
-import neural.neuron
-import neural.layout
-from neural.network import Network
-import neural.algorithm
+from . import neuron
+from . import layout
+from ._network import Network
+from . import algorithm
