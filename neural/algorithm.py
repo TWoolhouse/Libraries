@@ -8,18 +8,17 @@ class Algorithm:
 
 class Genetic(Algorithm):
 
-    def __init__(self, network: Network, population: int):
+    def __init__(self, network: Network, population: int, probability: float, weight: float=1.0):
         super().__init__(network)
         self.population_size: int = population
         self._active_population = {}
+        self._probability, self._weight = probability, weight
 
     def population(self) -> Iterator[Network]:
         """Create / Retrieve the next generation population"""
         if self._active_population:
             return iter(self._active_population)
-        self._active_population = {self.mutate(self.network.copy(),
-                                                            # Mutate settings
-                                                            ): None for _ in range(self.population_size-1)}
+        self._active_population = {self.mutate(self.network.copy()): None for _ in range(self.population_size-1)}
         self._active_population[self.network] = None
         return iter(self._active_population)
 
@@ -31,7 +30,13 @@ class Genetic(Algorithm):
 
     def mutate(self, network: Network) -> Network:
         """Takes network and mutates it by changing weights and biases of all the nodes."""
-        raise ValueError("TODO")
+        for neuron in network._neurons:
+            if random.random() <= self._probability:
+                neuron.bias += (random.random() - 0.5) * self._weight
+            for conn in neuron._connections:
+                if random.random() <= self._probability:
+                    neuron._connections[conn] += (random.random() - 0.5) * self._weight
+        return network
 
     def merge(self, all=True):
         """Merge the networks togeather based on the highest fitness"""
@@ -45,13 +50,3 @@ class Genetic(Algorithm):
         self.network: Network = max(self._active_population.items(), key=max_key)[0]
         self._active_population.clear()
         return self.network
-
-# def mutate(self, network: Network, magnitude: float=1, probability: float=1) -> Network:
-#     mag = magnitude * 2
-#     for neuron in network._neurons:
-#         if random.random() <= probability:
-#             neuron.bias += (random.random() - 0.5) * mag
-#         for conn in neuron._connections.values():
-#             if random.random() <= probability:
-#                 conn[1] += (random.random() - 0.5) * mag
-#     return network
