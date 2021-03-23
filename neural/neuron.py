@@ -16,7 +16,7 @@ class Neuron:
 
     def _calc(self) -> float:
         return _sigmoid(
-            sum(neuron.value() * weight for neuron, weight in self._connections.values())
+            sum(neuron.value() * weight for neuron, weight in self._connections.items())
             + self.bias
         )
 

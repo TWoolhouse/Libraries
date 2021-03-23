@@ -18,11 +18,11 @@ class Network:
 
     def result(self, output: tuple[float], *funcs: Callable[..., T]) -> T:
         """Call the function that is in the same index as the highest output"""
-        return max(zip(output, funcs))()
+        return max(zip(output, funcs), key=lambda x: x[0])[1]()
 
     def clear(self):
         for n in self._neurons:
-            n.clear()
+            n._clear()
 
     def copy(self) -> 'Network':
         return pickle.loads(pickle.dumps(self)) # TODO: This is slow
