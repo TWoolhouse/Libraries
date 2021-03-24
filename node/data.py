@@ -20,9 +20,12 @@ class Tag:
 
     def __bool__(self):
         return bool(self.tag)
-
     def __str__(self) -> str:
         return str(self.tag)
+    def __int__(self) -> int:
+        return int(self.tag)
+    def __float__(self) -> float:
+        return float(self.tag)
 
     def __repr__(self) -> str:
         return f"T{self.tag}"
@@ -30,7 +33,7 @@ class Tag:
 class Data:
     """Packet to Send over Network"""
 
-    def __init__(self, data: Union[str, bytes], *header: Union[str, Tag]):
+    def __init__(self, data: Any, *header: Union[str, Tag]):
         """Packet to Send over Network"""
         self.head = []
         self.tag = []

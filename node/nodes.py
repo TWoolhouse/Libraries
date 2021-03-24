@@ -55,7 +55,7 @@ class Node:
         return True
 
     async def _process_data(self, data: bytes):
-        head, tag, payload = data.split(b"|")
+        head, tag, payload = data.split(b"|", 2)
         head = head.decode("utf8").split("!")
         dtype, head = head[0], head[1:]
         tag = tag.decode("utf8").split("!")
@@ -72,7 +72,7 @@ class Node:
         head = "!".join([dtype]+data.head).encode("utf8")
         tag = "!".join(map(str, data.tag)).encode("utf8")
         block = head+b"|"+tag+b"|"+payload+b"<#>"
-        # print(block)
+        # print("{}:{}".format(*self.__writer.get_extra_info("peername")), block)
         self.__writer.write(block)
         try:
             await self.__writer.drain()
