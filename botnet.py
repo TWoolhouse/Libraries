@@ -4,6 +4,7 @@ import asyio
 import asyncio
 import functools
 import collections
+from typing import Any
 from interface import Interface
 
 __all__ = ["Botnet", "ControlCentre"]
@@ -16,12 +17,74 @@ class Permisson(enum.IntEnum):
 class Botnet:
 
     class Client(node.Client):
-        async def dsptch_a(self, data: node.Data):
-            pass
+        bot: 'Botnet'
+
+        async def open(self):
+            if await super().open():
+                await self.setup_config()
+                return True
+            return False
+
+        async def setup_config(self):
+            CMD = "setup_config"
+            self.send({
+                "job_count": 0,
+            }, CMD)
+
+            config: dict = (await self.recv(CMD))[0].data
+            self.bot.authority = Permisson(config["auth"])
+
+        async def dsptch_process(self, data: node.Data):
+            jid, iid = data.tag
+            data.data, done = await self.bot.programs[int(jid)].process(data.data)
+            if not done:
+                data.tag.append(node.Tag(False))
+            self.send(data)
+
+        async def dsptch_job_load(self, data: node.Data):
+            PREFIX = "job_load_"
+            jid: int = data.data
+            tag = node.Tag(jid)
+            prog = (await self.recv(f"{PREFIX}program", tag))[0].data
+            self.bot.programs[jid] = prog
+            prog.bot = self.bot
+            self.send(True, f"{PREFIX}done", tag)
+
+        async def dsptch_job_unload(self, data: node.Data):
+            CMD = "job_unload"
+            jid = data.data
+            del self.bot.programs[jid]
+            self.send(True, CMD, node.Tag(jid))
+
+        async def create_job(self, program: 'Program', files, save=False) -> int:
+            """Creates job on server from a Program spec. Returns Job ID"""
+            PREFIX = "create_job_"
+            self.send(program, PREFIX[:-1])
+            jid: int = (await self.recv(f"{PREFIX}id"))[0].data
+            jtag = node.Tag(jid)
+            self.send({
+                "file_count": len(files),
+                "save": save,
+            }, f"{PREFIX}meta", jtag)
+            for file in files:
+                self.send(file, f"{PREFIX}file", jtag)
+            await self.recv(f"{PREFIX}done", jtag)
+            return jid
+            # TODO Files & Fail
+
+        async def finish_job(self, job: int) -> list[Any]:
+            PREFIX = "finish_job_"
+            self.send(job, PREFIX[:-1])
+            tag = node.Tag(job)
+            count = (await self.recv(f"{PREFIX}count", tag))[0].data
+            data = await self.recv(f"{PREFIX}item", tag, wait=count)
+            return (i.data for i in data)
 
     def __init__(self, addr: str, port: int):
         self.connection = self.Client(addr, port)
+        self.connection.bot = self
         self.authority = Permisson.NONE
+        self.programs: dict[int, Program] = {}
 
     def __enter__(self):
         raise NotImplementedError
@@ -32,58 +95,51 @@ class Botnet:
     async def __aexit__(self, *args):
         await self.connection.__aexit__(*args)
 
-    async def create_job(self, program, files, save=False) -> int:
-        PREFIX = "create_job_"
-        self.connection.send(program, PREFIX[:-1])
-        jid = (await self.connection.recv(f"{PREFIX}id"))[0].data
-        jtag = node.Tag(jid)
-        self.connection.send({
-            "file_count": len(files),
-            "save": save,
-        }, f"{PREFIX}meta", str(jid), jtag)
-        for file in files:
-            self.connection.send(file, f"{PREFIX}file", jtag)
-        await self.connection.recv(f"{PREFIX}done", jtag)
-        return jid
+    async def create_job(self, program: 'Program', files, save=False) -> int:
+        return await self.connection.create_job(program, files, save=save)
 
-    async def feed(self, job: int, *data, wait=False):
+    async def feed(self, job: int, *data):
+        """Send data items for a Job ID"""
         for item in data:
             self.connection.send(item, "FEED", node.Tag(job))
+
+    async def wait(self, job: int):
+        return await self.connection.finish_job(job)
 
 class ControlCentre:
 
     class SClient(node.SClient):
+        """Server Side Client"""
         @property
         def cnc(self) -> 'ControlCentre':
             return self.server.cnc
+        worker: 'ControlCentre.Worker'
 
         async def open(self):
             await super().open()
-            config = await self.setup_config()
-            self.cnc.add_worker(self, **config)
+            await self.setup_config()
+            Interface.schedulc(self.cnc.worker_run(self.worker))
         async def close(self):
             addr = self.server.connections[self]
             await super().close()
             # print(addr)
 
         async def setup_config(self) -> dict:
-            PREFIX = "setup_config_"
-            config: dict = await self.recv(PREFIX[:-1])
+            CMD = "setup_config"
+            config: dict = (await asyncio.wait_for(self.recv(CMD), 15))[0].data
+            self.send({
+                "auth": Permisson.WORKER.value,
+            }, CMD)
 
-
-
-        async def distribute_data(self, data: node.Data):
-            """Send Data to all Connections"""
-            await Interface.gather(*(
-                con.send(data)
-                for con in self.server.connections
-            ))
+            await self.cnc.add_worker(self, **config)
 
         async def dsptch_kill(self, data: node.Data):
             """Kill the Control Server"""
+            # TODO: Req Permisson
             await self.cnc.kill()
             return True
         async def dsptch_cmd(self, data: node.Data):
+            """Sends Data Command to all other Connections"""
             print("CMD Input:", type(data.data), data)
             await Interface.gather(*(con.send(data) for con in (c for c in self.server.connections if c is not self)))
         async def dsptch_feed(self, data: node.Data):
@@ -95,36 +151,84 @@ class ControlCentre:
             PREFIX = "create_job_"
             jid = self.cnc.unique()
             jtag = node.Tag(jid)
-            self.send(jid, f"{PREFIX}id", jtag)
+            self.send(jid, f"{PREFIX}id")
             meta_data: dict = (await self.recv(f"{PREFIX}meta", jtag))[0].data
             files = await self.recv(f"{PREFIX}file", jtag, wait=meta_data["file_count"])
             await self.cnc.create_job(jid, data.data, files, save=meta_data.get("save", False))
             await self.send(True, f"{PREFIX}done", jtag)
             return True
+            # TODO: Files
         async def dsptch_finish_job(self, data: node.Data):
             """Finish Job"""
-            await self.cnc.finish_job(data.data)
+            PREFIX = "finish_job_"
+            job = await self.cnc.finish_job(data.data)
+            tag = node.Tag(job.id)
+            self.send(job.count, f"{PREFIX}count", tag)
+            CMD = f"{PREFIX}item"
+            for i in range(job.count):
+                item: ControlCentre.Item = await job.done.get()
+                self.send(item.data, CMD, tag, node.Tag(item.id))
             return True
+
+        async def process(self, data, job: int, item: int) -> tuple[Any, bool]:
+            CMD = "process"
+            tags = node.Tag(job), node.Tag(item)
+            self.send(data, CMD, *tags)
+            result = (await self.recv(CMD, *tags))[0]
+            return (result.data, (False not in result.tag))
+
+        async def job_load(self, job: 'ControlCentre.Job') -> bool:
+            PREFIX = "job_load_"
+            tag = node.Tag(job.id)
+            self.send(job.id, PREFIX[:-1])
+            self.send(job.program, f"{PREFIX}program", tag)
+            return (await self.recv(f"{PREFIX}done", tag))[0].data
+
+        async def job_unload(self, job: 'ControlCentre.Job') -> bool:
+            CMD = "job_unload"
+            self.send(job.id, CMD)
+            return (await self.recv(CMD, node.Tag(job.id)))[0].data
 
     class Worker:
         ACTIVE = 3
-        def __init__(self, cnc: 'ControlCentre', connection: 'ControlCentre.SClient'):
+        def __init__(self, connection: 'ControlCentre.SClient', job_max: int):
             self.connection = connection
             self.queue: list[ControlCentre.Item] = collections.deque()
             self.semaphore = asyncio.BoundedSemaphore(self.ACTIVE)
-            self.jobs: ControlCentre.Job = set()
+            self.jobs: set[ControlCentre.Job] = set()
+            self.jobs_max: int = job_max
 
         async def process(self, item: 'ControlCentre.Item'):
-            # Send to client
-            pass
+            # TODO: Send to client and await for result
+            res, done = await self.connection.process(item.data, item.job.id, item.id)
+            return res
+            # TODO: On fail
 
-        async def load_job(self, job: 'ControlCentre.Job'):
-            pass
+        async def job_load(self, job: 'ControlCentre.Job') -> bool:
+            # TODO: Send info for Job
+            if job in self.jobs or (self.jobs_max and len(self.jobs) >= self.jobs_max):
+                return None
+            try:
+                self.jobs_max -= 1
+                done = await self.connection.job_load(job)
+            finally:
+                self.jobs_max += 1
+
+            if done:
+                self.jobs.add(job)
+                return True
+            return False
+
+        async def job_unload(self, job: 'ControlCentre.Job'):
+            # TODO: Tell Client to forget Job
+            if job not in self.jobs:
+                return None
+            return await self.connection.job_unload(job)
 
     class Job:
         def __init__(self, id, program):
-            self.id = id
-            self.program = program
+            self.id: int = id
+            self.program: Program = program
             self.active: int = 0
             self.count: int = 0
 
@@ -132,8 +236,8 @@ class ControlCentre:
 
     class Item:
         def __init__(self, job: 'ControlCentre.Job', data):
-            self.id = job.count
-            self.job = job
+            self.id: int = job.count
+            self.job: ControlCentre.Job = job
             self.data = data
 
             self.job.count += 1
@@ -157,19 +261,22 @@ class ControlCentre:
         self._unique_ids = set()
         self.manager = asyio.MultiQueue()
 
-    async def create_job(self, jid: int, program, files: list, save=False):
+    async def create_job(self, jid: int, program: 'Program', files: list, save=False):
         job = self.jobs[jid] = self.Job(jid, program)
         self.manager.create(job, asyncio.Queue())
+        Interface.schedulc(self.update_worker_jobs())
         return jid
 
-    async def finish_job(self, jid: int):
+    async def finish_job(self, jid: int) -> 'ControlCentre.Job':
         job: ControlCentre.Job = self.jobs[jid]
         que = self.manager[job]
         await que.join()
         self.manager.delete(job)
+        Interface.schedulc(self.update_worker_jobs(job))
         # if not save:
         del self.jobs[jid]
         self.unique(jid)
+        return job
 
     def feed(self, jid: int, data):
         job: ControlCentre.Job = self.jobs[jid]
@@ -177,17 +284,31 @@ class ControlCentre:
             job, data
         ))
 
-    async def add_worker(self):
-        pass
+    async def update_worker_jobs(self, remove: Job=None):
+        if remove is not None:
+            await Interface.gather(*(client.worker.job_unload(remove) for client in self.server.connections.keys()))
+        await Interface.gather(*(client.worker.job_load(job) for client in self.server.connections.keys() for job in self.jobs.values()))
 
-    async def process_item(self, worker: 'ControlCentre.Worker'):
+    async def add_worker(self, connection: SClient, job_count: int=0, **kw) -> Worker:
+        worker =  self.Worker(connection, job_count)
+        connection.worker = worker
+        await Interface.gather(*(worker.job_load(job) for job in self.jobs.values()))
+        return worker
+
+    async def worker_run(self, worker: Worker):
         while True:
             async with worker.semaphore:
-                item: ControlCentre.Item = await self.manager.get(*worker.jobs)
                 try:
-                    data = await worker.process(item)
+                    item: ControlCentre.Item = await self.manager.get(*worker.jobs)
+                except KeyError as e:
+                    await Interface.next()
+                    continue
+                try:
+                    item.data = data = await worker.process(item)
                     item.job.done.put_nowait(item)
                 except ConnectionError as e:
+                    print(e)
+                    raise
                     # Connection Closed
                     # Append unfinished items
                     return
@@ -217,47 +338,13 @@ class ControlCentre:
     async def __aexit__(self, *args):
         await self.server.__aexit__(*args)
 
+    async def serve(self) -> bool:
+        await self.__aenter__()
+
 class Program:
 
     def __init__(self):
+        self.bot: Botnet
+
+    async def process(self, data: Any):
         pass
-
-    def __getstate__(self) -> dict:
-        return {}
-    def __setstate__(self, state: dict):
-        pass
-
-async def establish_communism(size: int):
-    f = Interface.gather(*(Interface.schedule(worker()) for i in range(size)))
-    await Interface.next()
-    return f
-
-async def worker():
-    # print("Worker")
-    async with Botnet("127.0.0.1", 51115) as bot:
-        print(await bot.connection.recv("cmd"))
-
-async def main():
-    async with ControlCentre(51115) as cc:
-        async with Botnet("127.0.0.1", 51115) as bot:
-            await bot.create_job("my_program", (), save=True)
-        await Interface.next(0.1)
-
-    Interface.stop()
-
-if __name__ == "__main__":
-    Interface.schedule(main())
-    Interface.main()
-
-# import sys
-# import os.path
-# import modulefinder
-# finder = modulefinder.ModuleFinder()
-# finder.run_script(sys.argv[0])
-# path = [os.path.normpath(f) for f in sys.path[2:]]
-# for name, mod in sorted(finder.modules.items()):
-#     if mod.__file__:
-#         p = os.path.normpath(mod.__file__)
-#         if not any(f in p for f in path):
-#             print(name, mod.__file__)
-# print(path)

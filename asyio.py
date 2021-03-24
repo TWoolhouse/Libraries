@@ -23,6 +23,9 @@ class MultiQueue:
         return self.queues[key]
 
     async def get(self, *keys):
+        """Await for a value from any of the queues from keys"""
+        if not keys:
+            raise KeyError("Need atleast 1 Key")
         queues = {self.queues[key] for key in keys}
         output = self._loop.create_future()
 
