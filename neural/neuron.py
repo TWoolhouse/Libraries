@@ -15,7 +15,7 @@ class Neuron:
         return self._value
 
     def _calc(self) -> float:
-        return _sigmoid(
+        return (
             sum(neuron.value() * weight for neuron, weight in self._connections.items())
             + self.bias
         )
@@ -39,6 +39,10 @@ class Input(Neuron):
     def set(self, value: float):
         self._clear()
         self._value = value
+
+class Output(Neuron):
+    def _calc(self) -> float:
+        return _sigmoid(super()._calc())
 
 class Recurrent(Neuron):
 
