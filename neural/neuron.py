@@ -30,6 +30,7 @@ class Neuron:
         return self.id, self.bias, {n.id: v for n,v in self._connections.items()}
     def __setstate__(self, data: tuple[int, float, dict[int, float]]):
         self.id, self.bias, self._connections = data
+        self._value = None
 
 N = TypeVar("N", bound=Neuron)
 Hidden = Neuron
