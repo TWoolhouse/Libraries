@@ -18,7 +18,7 @@ class Neuron:
         return (
             sum(neuron.value() * weight for neuron, weight in self._connections.items())
             + self.bias
-        )
+        ) / max(1, len(self._connections))
 
     def _clear(self):
         self._value = None
