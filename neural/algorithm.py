@@ -11,20 +11,20 @@ class Genetic(Algorithm):
     def __init__(self, network: Network, population: int, probability: float, weight: float=1.0):
         super().__init__(network)
         self.population_size: int = population
-        self._active_population = {}
+        self._active_population = {self.network: None}
         self._probability, self._weight = probability, weight
 
     def population(self) -> Iterator[Network]:
         """Create / Retrieve the next generation population"""
-        if self._active_population:
+        if len(self._active_population) > 1:
             return iter(self._active_population)
-        self._active_population = {self.mutate(self.network.copy()): None for _ in range(self.population_size-1)}
-        self._active_population[self.network] = None
+        self._active_population |= {self.mutate(self.network.copy()): None for _ in range(self.population_size-1)}
         return iter(self._active_population)
 
     def fitness(self, network: Network, value):
         if network in self._active_population:
-            self._active_population[network] = value
+            old = self._active_population[network]
+            self._active_population[network] = value if old is None else (old if value is None else max(value, old))
             return value
         raise KeyError("Network not in Algorithm")
 
@@ -38,7 +38,7 @@ class Genetic(Algorithm):
                     neuron._connections[conn] += (random.random() - 0.5) * self._weight
         return network
 
-    def merge(self, all=True):
+    def merge(self, all=True, save=True):
         """Merge the networks togeather based on the highest fitness"""
         if all:
             def max_key(kv):
@@ -47,6 +47,7 @@ class Genetic(Algorithm):
                 return kv[1]
         else:
             max_key = lambda kv: kv[1]
-        self.network: Network = max(self._active_population.items(), key=max_key)[0]
+        self.network, score = max(self._active_population.items(), key=max_key)
         self._active_population.clear()
-        return self.network
+        self._active_population[self.network] = score if save else None
+        return self.network, score
