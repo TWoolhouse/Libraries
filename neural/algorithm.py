@@ -32,10 +32,10 @@ class Genetic(Algorithm):
         """Takes network and mutates it by changing weights and biases of all the nodes."""
         for neuron in network._neurons:
             if random.random() <= self._probability:
-                neuron.bias += (random.random() - 0.5) * self._weight
+                neuron.bias += (random.random() - 0.5) * 2 * self._weight
             for conn in neuron._connections:
                 if random.random() <= self._probability:
-                    neuron._connections[conn] += (random.random() - 0.5) * self._weight
+                    neuron._connections[conn] += (random.random() - 0.5) * 2 * self._weight
         return network
 
     def merge(self, all=True, save=True):
