@@ -33,11 +33,14 @@ class DBInterface:
     def select(self, tbl: Table, *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> Callable[[int], Iterable[Row]]:
         ...
     @overload
+    def select(self, tbl: tuple[Table], *conditions: Tuple[Condition, ...], cols: Sequence[Union[Column, str, int]]=()) -> Callable[[int], Iterable[Row]]:
+        ...
+    @overload
     def select(self, tbl: Join, *conditions: Tuple[Condition, ...], cols: Sequence[Column]=()) -> Callable[[int], Iterable[Row]]:
         ...
-    def select(self, tbl, *conditions, cols=()) -> Callable[[int], Iterable[Row]]:
+    def select(self, tbl, *conditions, cols=(), order: tuple[Column]=None) -> Callable[[int], Iterable[Row]]:
         """Select"""
-        return self.__c.select(tbl, *conditions, columns=cols)
+        return self.__c.select(tbl, *conditions, columns=cols, order=order)
 
     def finish(self):
         self._db._close_dbi(self.__name)
@@ -149,9 +152,9 @@ class DBInterfaceAsync(DBInterface):
     @overload
     async def select(self, tbl: Join, *conditions: Tuple[Condition, ...], cols: Sequence[Column]=()) -> Callable[[int], Iterable[Row]]:
         ...
-    async def select(self, tbl, *conditions, cols=()) -> Callable[[int], Iterable[Row]]:
+    async def select(self, tbl, *conditions, cols=(), order: tuple[Column]=None) -> Callable[[int], Iterable[Row]]:
         """Select"""
-        return await self.__func_call(super().select, tbl, *conditions, cols=cols)
+        return await self.__func_call(super().select, tbl, *conditions, cols=cols, order=order)
 
 class DatabaseAsync(Database):
 

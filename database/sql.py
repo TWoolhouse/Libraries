@@ -136,16 +136,31 @@ class Cursor:
         else:
             return self.__cursor.fetchmany(amount)
 
-    def select(self, table: Table, *conditions: Tuple[Condition, ...], columns: Column=()) -> fetch:
+    def select(self, table: Table, *conditions: Tuple[Condition, ...], columns: Column=(), order: tuple[Column, -1]=None) -> fetch:
+        order_out = None
+        if not isinstance(order, tuple):
+            order = (order, 1)
         if isinstance(table, Join):
             name = f"{table.first.parent.name} {table.jtype.value} JOIN {table.second.parent.name} ON {table.first.parent.name}.{table.first.name}={table.second.parent.name}.{table.second.name}"
             params, condition = self.__select_join(table, conditions)
             columns = map(lambda x: f"{x.parent.name}.{x.name}", columns)
+            if order[0]:
+                order_out = f"{order[0].parent.name}.{order[0].name}"
+        elif isinstance(table, tuple):
+            name = ", ".join((t.name for t in table))
+            params, condition = self.__select_join(table, conditions)
+            columns = map(lambda x: f"{x.parent.name}.{x.name}", columns)
+            if order[0]:
+                order_out = f"{order[0].parent.name}.{order[0].name}"
         else:
             name = table.name
             params, condition = self.__select_std(table, conditions)
             columns = map(lambda x: enstrc(table, x), columns)
-        self._s_select(name, params, columns, condition)
+            if order[0]:
+                order_out = enstrc(table, order[0])
+        if order[0] and len(order) > 1:
+            order_out += " " + ("ASC" if order[1] > 0 else "DESC")
+        self._s_select(name, params, columns, condition, order_out)
         return self.fetch
 
     def __select_join(self, table: Table, conditions: (Condition,)) -> (list, str):
@@ -213,8 +228,8 @@ class Cursor:
         self.__cursor.execute(stmt, params)
         return self
 
-    def _s_select(self, table: str, params: tuple, columns: (str,)=("*",), condition: str=None):
-        self.exec(f"SELECT {c if (c := ', '.join(columns)) else '*'} FROM {table} {f'WHERE {condition}' if condition else ''}", params)
+    def _s_select(self, table: str, params: tuple, columns: (str,)=("*",), condition: str=None, order: str=None):
+        self.exec(f"SELECT {c if (c := ', '.join(columns)) else '*'} FROM {table} {f'WHERE {condition}' if condition else ''} {f'ORDER BY {order}' if order is not None else ''}", params)
 
     def _s_insert_into(self, table: str, columns: (str,), values: tuple) -> int:
         self.exec(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({('?,'*len(values))[:-1]})", values)

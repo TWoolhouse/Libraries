@@ -186,7 +186,7 @@ class SClient(DataInterface):
 
 class Server:
 
-    def __init__(self, addr: str, port: int, limit: int=100, encrypt=False, client: Type[SClient]=SClient, **dispatch: Dispatch):
+    def __init__(self, addr: str, port: int, limit: int=100, client: Type[SClient]=SClient, **dispatch: Dispatch):
         self.addr, self.port = addr, port
         self.limit = limit
         self.client = client

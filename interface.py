@@ -133,7 +133,7 @@ class Interface:
         def InterfaceThread():
             asyncio.set_event_loop(self.__loop)
             self.main()
-        threading.Thread(target=InterfaceThread, name=self.__class__.__name__).start()
+        threading.Thread(target=InterfaceThread, name=self.__class__.__name__, daemon=False).start()
         return self
 
     def gather(self, *coro: Union[Coroutine, asyncio.Future], exception=False) -> asyncio.Future:
