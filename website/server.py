@@ -1,4 +1,5 @@
 import ssl
+import json
 import debug
 import socket
 import asyncio
@@ -410,6 +411,9 @@ class Server:
                                 "data": content,
                                 }
                         query.update(data)
+                    elif "content-type" in headers and "application/json" in headers["content-type"].value:
+                        body = json.loads(body)
+                        query.update(body)
                     else:
                         # Deal with binary values
                         body = body.decode().strip()
