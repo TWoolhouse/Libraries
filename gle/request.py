@@ -6,9 +6,10 @@ import asyncio
 import functools
 import urllib.parse
 import urllib.request
+from typing import Union
 from bs4 import BeautifulSoup
 from interface import Interface
-from collections import namedtuple
+from dataclasses import dataclass
 from youtube_search import YoutubeSearch as _YoutubeSearch
 
 USER_AGENT = {"User-Agent": r"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36"}
@@ -57,7 +58,10 @@ class Request:
 class Search(Request):
 
     SITE = r"https://www.google.com/search?"
-    Result = namedtuple("Result", ["url", "title"])
+    @dataclass
+    class Result:
+        url: str
+        title: str
 
     def __init__(self, *terms: str, count: int=10, site: str=None):
         self.terms = terms
@@ -142,7 +146,12 @@ class Youtube(Request):
 
     SITE = r"https://www.youtube.com/results?"
     URL = r"https://www.youtube.com/watch?v={}"
-    Video = namedtuple("Video", ["id", "title", "channel", "duration"])
+    @dataclass
+    class Video:
+        id: str
+        title: str
+        channel: str
+        duration: int
 
     def __init__(self, *terms):
         self.terms = terms
@@ -157,7 +166,7 @@ class Youtube(Request):
 
     @property
     @Request._require
-    def videos(self):
+    def videos(self) -> list[Video]:
         return self._req_videos
 
 class YoutubeDownload(Request):
@@ -167,16 +176,19 @@ class YoutubeDownload(Request):
         Video = 2
         AuVid = 3
 
-    def __init__(self, url: str, stream: Stream=Stream.Audio):
-        self.url = url
+    def __init__(self, url: Union[str, Youtube.Video], stream: Stream=Stream.Audio):
+        self.url = "v="+url.id if isinstance(url, Youtube.Video) else url
         self.stype = stream
         self._req_mem = io.BytesIO()
 
     async def _request(self):
-        response: pytube.YouTube = await Interface.process(pytube.YouTube, self.url)
+        try:
+            response: pytube.YouTube = await Interface.process(pytube.YouTube, self.url)
+        except Exception as exc:
+            raise
         mem = io.BytesIO()
         if self.stype is self.Stream.Audio:
-            stream = response.streams.filter(only_audio=True).order_by("abr").last()
+            stream = await Interface.process(lambda: response.streams.filter(only_audio=True).order_by("abr").last())
         else:
             raise ValueError("IM LAZY FIX ME")
         await Interface.process(stream.stream_to_buffer, mem)
