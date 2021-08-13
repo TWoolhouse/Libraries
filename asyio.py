@@ -4,7 +4,7 @@ import subprocess
 import urllib.request
 import http.client
 import collections
-from typing import Union
+from typing import Union, Generic, TypeVar
 
 __all__ = ["Counter", "MultiQueue", "Request", "Process", "ProcessFast", "StateWatcher"]
 
@@ -198,28 +198,37 @@ class Nevent(asyncio.Event):
     def is_set(self):
         return not self._value
 
-class StateWatcher:
+T = TypeVar("StateWatcherVarType")
+class StateWatcher(Generic[T]):
 
-    def __init__(self, value, func="__eq__"):
-        self._val = value
+    def __init__(self, value: T, func="__eq__"):
+        self._val: T = value
         self._waiters = {}
         self._func = func
+        self._mimics: set[StateWatcher[T]] = set()
+        self._mimic_other = None
 
     @property
-    def value(self):
+    def value(self) -> T:
         return self._val
 
     @value.setter
-    def value(self, value):
+    def value(self, value: T) -> T:
         self._val = value
         func = getattr(self._val, self._func)
         for fut, val in tuple(self._waiters.items()):
             if func(val):
                 fut.set_result(self._val)
                 del self._waiters[fut]
+        for other in self._mimics:
+            other.value = value
         return value
 
-    def wait(self, value) -> asyncio.Future:
+    def set(self, value: T) -> T:
+        self.value = value
+        return value
+
+    def wait(self, value: T) -> asyncio.Future:
         fut = Interface.loop.create_future()
         if getattr(self._val, self._func)(value):
             fut.set_result(self._val)
@@ -228,7 +237,16 @@ class StateWatcher:
         return fut
 
     def chain(self, fut: asyncio.Future):
-        self.value: Status = fut.result()
+        self.value: T = fut.result()
+
+    def mimic(self, other: 'StateWatcher'):
+        if self._mimic_other is not None:
+            self._mimic_other._mimics.discard(self)
+        self._mimic_other = other
+        if other is None:
+            return
+        other._mimics.add(self)
+        self.value = other.value
 
     def clear(self, cancel=False):
         for fut in tuple(self._waiters.keys()):
