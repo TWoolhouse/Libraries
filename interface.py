@@ -13,6 +13,10 @@ class Batch:
         self.__trigger = False
         self.__callbacks = set()
 
+    def remove(self, fut):
+        if self.__trigger:    return
+        self.__callbacks.discard(fut)
+
     def schedule(self, function: Union[Coroutine, Callable, asyncio.Future], *args: Any, **kwargs: Any) -> asyncio.Future:
         fut = Interface.loop.create_future()
         async def execute():
@@ -146,6 +150,7 @@ class Interface:
         await asyncio.sleep(time)
 
     def chain(self, wait: asyncio.Future, func: Union[Coroutine, Callable, asyncio.Future], *args, **kwargs) -> asyncio.Future:
+        """Chain a future to trigger another"""
         fut = self.__loop.create_future()
         def chain_fut_func(f):
             asyncio.futures._chain_future(self.schedule(func, *args, **kwargs), fut)
@@ -154,6 +159,9 @@ class Interface:
 
     def single(*_):
         return mp.current_process().name == "MainProcess"
+
+    def traceback(self, exc: Exception) -> str:
+        return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
     class Repeat:
 
@@ -210,7 +218,7 @@ class Interface:
                             await Interface.next(self.__parent.delay)
                             result = await self.__parent.__call__(*self.__params[0], **self.__params[1])
                     except Exception as e:
-                        print(f"{self.__parent.__class__.__name__} Error: {self.__parent.__call__}", "".join(traceback.format_exception(e, e, e.__traceback__)))
+                        print(f"{self.__parent.__class__.__name__} Error: {self.__parent.__call__}", Interface.traceback(e))
                 self.__event = False
                 self.__done.set()
 
