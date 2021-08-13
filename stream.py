@@ -10,6 +10,9 @@ class Stream(io.BufferedIOBase):
         self._index = 0
         self._data = collections.deque()
 
+    def __len__(self) -> int:
+        return self._data.__len__()
+
     def close(self):
         if not self._closed:
             self._closed = True
@@ -100,12 +103,12 @@ class StreamArray(Stream):
 
     def read(self, size=-1) -> np.ndarray:
         if size == 0:
-            return np.empty((0, self._shape[1]), dtype=self._dtype)
+            return np.zeros((0, *self._shape[1:]), dtype=self._dtype)
 
         blocks = self._read_blocks(size)
         if blocks:
             return np.concatenate(blocks)
-        return np.zeros((0, self._shape[1]), dtype=self._dtype)
+        return self.read(0)
 
     def write(self, buffer: np.ndarray):
         index = 0
