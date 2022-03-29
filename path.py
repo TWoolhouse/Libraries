@@ -1,4 +1,5 @@
 import sys
-import os
+from pathlib import Path
 
-PATH = (os.path.dirname(os.path.abspath(sys.argv[0]))+"/").replace("\\", "/")
+Path = Path(sys.argv[0]).parent.absolute()
+PATH = Path.as_posix()
